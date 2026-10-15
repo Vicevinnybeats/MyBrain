@@ -1,0 +1,24 @@
+----------------------------------------------------------------------------
+MyBrain
+Copyright 2026 vicevinnybeats
+
+MyBrain is derived from Graphify (https://github.com/Graphify-Labs/graphify),
+licensed under the Apache License, Version 2.0. The original Graphify NOTICE
+is reproduced above, and LICENSE / LICENSE-MIT are kept unchanged.
+
+Changes made by MyBrain:
+  - Renamed the package, CLI, slash command, output folder and all
+    user-facing text from "graphify" to "mybrain" (MyBrain).
+  - Removed the hosted-platform / sign-up / free-trial messages and links.
+  - Generated HTML pages bundle their JavaScript (vis-network, d3, mermaid)
+    instead of loading it from outside CDNs.
+  - Replaced the Claude Code skill with a free, code-only-by-default skill
+    (docs/PDF/images only through a local Ollama, never a paid API key).
+  - Added the MyBrain web app (webapp/), the GitHub Actions workflow that
+    publishes maps automatically, and the scripts in sync/ that re-apply
+    these changes to newer Graphify versions.
+
+Bundled third-party JavaScript (see sync/vendor/licenses/):
+  - vis-network 9.1.6 (Apache-2.0 OR MIT)
+  - d3 7.9.0 (ISC)
+  - mermaid 11.12.0 (MIT)

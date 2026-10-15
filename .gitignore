@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.sync-work/
+/mybrain-out/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+node_modules/
