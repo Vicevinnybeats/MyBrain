@@ -1,0 +1,9 @@
+// MyBrain web app: a static Cloudflare Worker built from this repository.
+// Cloudflare rebuilds it on every push (Workers Builds, build command: sh build.sh).
+{
+  "name": "mybrain",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}

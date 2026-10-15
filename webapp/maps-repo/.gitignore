@@ -1,0 +1,4 @@
+.mybrain/
+dist/
+node_modules/
+.wrangler/

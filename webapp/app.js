@@ -1,0 +1,461 @@
+/* MyBrain web app: map list, map view, search, bottom sheet, lobes, Brain Scan. */
+(function () {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const PALETTE = window.BrainGraph.PALETTE;
+  const fmt = (n) => n.toLocaleString('en-US');
+  const isPhone = () => window.matchMedia('(max-width: 899px)').matches;
+  const themeNow = () => (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+
+  let graph = null, map = null, worker = null, mapName = null, reportText = null, sheetMode = null;
+
+  // ------------------------------------------------------------ tiny cache --
+  // Finished layouts are kept in IndexedDB so a map opens instantly next time.
+  const idb = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('mybrain', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('layouts');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    }));
+    const tx = async (mode, fn) => {
+      try {
+        const db = await open();
+        return await new Promise((res, rej) => {
+          const t = db.transaction('layouts', mode), st = t.objectStore('layouts');
+          const r = fn(st); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error);
+        });
+      } catch (e) { return undefined; }
+    };
+    return { get: (k) => tx('readonly', st => st.get(k)), set: (k, v) => tx('readwrite', st => st.put(v, k)) };
+  })();
+
+  // ---------------------------------------------------------------- router --
+  function route() {
+    const m = location.hash.match(/^#\/map\/([^/?]+)/);
+    if (m) openMap(decodeURIComponent(m[1]));
+    else showHome();
+  }
+  window.addEventListener('hashchange', route);
+
+  // ------------------------------------------------------------------ home --
+  function ago(iso) {
+    if (!iso) return '';
+    const s = (Date.now() - Date.parse(iso)) / 1000;
+    if (s < 90) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    return Math.round(s / 86400) + ' days ago';
+  }
+
+  function cardDots(seed) {
+    // little decorative network per card, stable per name
+    let h = 2166136261;
+    for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    const rnd = () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) / 4294967296);
+    const pts = Array.from({ length: 7 }, () => [6 + rnd() * 32, 6 + rnd() * 32]);
+    let svg = '<svg class="dots" viewBox="0 0 44 44">';
+    for (let i = 1; i < pts.length; i++) {
+      const j = Math.floor(rnd() * i);
+      svg += `<line x1="${pts[i][0]}" y1="${pts[i][1]}" x2="${pts[j][0]}" y2="${pts[j][1]}" stroke="${PALETTE[i % 10]}" stroke-opacity=".6"/>`;
+    }
+    pts.forEach((p, i) => { svg += `<circle cx="${p[0]}" cy="${p[1]}" r="${i ? 2.6 : 4}" fill="${PALETTE[(i * 3) % 10]}"/>`; });
+    return svg + '</svg>';
+  }
+
+  async function showHome() {
+    closeMap();
+    $('#mapview').hidden = true;
+    $('#home').hidden = false;
+    document.title = 'MyBrain';
+    const list = $('#map-list');
+    list.innerHTML = '<p class="muted">Loading maps…</p>';
+    let idx = [];
+    try {
+      const r = await fetch('maps/index.json', { cache: 'no-cache', credentials: 'same-origin' });
+      if (r.ok) idx = (await r.json()).maps || [];
+    } catch (e) { /* offline and never cached */ }
+    list.innerHTML = '';
+    $('#home-empty').hidden = idx.length > 0;
+    idx.sort((a, b) => (b.published || '').localeCompare(a.published || ''));
+    for (const m of idx) {
+      const b = document.createElement('button');
+      b.className = 'map-card';
+      b.innerHTML = `${cardDots(m.name)}<div><h2>${esc(m.name)}</h2>
+        <p>${fmt(m.stats.neurons)} neurons · ${fmt(m.stats.synapses)} synapses · ${fmt(m.stats.lobes)} lobes</p>
+        <p class="muted">updated ${esc(ago(m.published))}</p></div>`;
+      b.onclick = () => { location.hash = '#/map/' + encodeURIComponent(m.name); };
+      list.appendChild(b);
+    }
+  }
+
+  // --------------------------------------------------------------- map view --
+  function closeMap() {
+    if (worker) { worker.terminate(); worker = null; }
+    if (graph) { graph.destroy(); graph = null; window.__mybrain = null; }
+    map = null; mapName = null; reportText = null;
+    closeSheet();
+  }
+
+  async function openMap(name) {
+    if (mapName === name && graph) return;
+    closeMap();
+    mapName = name;
+    $('#home').hidden = true;
+    $('#mapview').hidden = false;
+    document.title = name + ' · MyBrain';
+    $('#search').value = '';
+    $('#results').hidden = true;
+    $('#map-title').innerHTML = `<b>${esc(name)}</b>`;
+    setProgress(0.03, 'Loading map…');
+    try {
+      const r = await fetch(`maps/${encodeURIComponent(name)}/map.json`, { cache: 'no-cache', credentials: 'same-origin' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      map = await r.json();
+    } catch (e) {
+      setProgress(null);
+      $('#map-title').innerHTML = `<b>${esc(name)}</b> - could not load this map (${esc(e.message)})`;
+      return;
+    }
+    if (mapName !== name) return;
+    const st = map.stats;
+    $('#map-title').innerHTML = `<b>${esc(name)}</b> · ${fmt(st.neurons)} neurons · ${fmt(st.synapses)} synapses · ${fmt(st.lobes)} lobes`;
+
+    graph = new window.BrainGraph($('#canvas'), map, {
+      theme: themeNow(),
+      onSelect: (i) => (i >= 0 ? showNode(i) : (sheetMode === 'node' || sheetMode === 'explain') && closeSheet()),
+      onHover: showTooltip,
+    });
+    window.__mybrain = graph;   // handy for debugging / tests
+
+    const key = `${name}@${map.published}`;
+    const cached = await idb.get(key);
+    if (cached && cached.length === 2 * map.nodes.label.length) {
+      graph.setPositions(cached, true);
+      setProgress(null);
+      return;
+    }
+    runLayout(key);
+  }
+
+  function runLayout(key) {
+    setProgress(0.08, 'Growing neurons…');
+    const n = map.nodes.label.length, E = map.edges.length / 3;
+    const edges = new Int32Array(2 * E);
+    for (let e = 0; e < E; e++) { edges[2 * e] = map.edges[3 * e]; edges[2 * e + 1] = map.edges[3 * e + 1]; }
+    const lobe = Int32Array.from(map.nodes.lobe);
+    worker = new Worker('layout-worker.js');
+    let first = true;
+    worker.onmessage = (ev) => {
+      const d = ev.data;
+      if (d.type === 'progress') { setProgress(d.value); return; }
+      if (!graph) return;
+      graph.setPositions(d.pos, first);
+      first = false;
+      setProgress(d.done ? null : d.value);
+      if (d.done) { idb.set(key, d.pos); worker.terminate(); worker = null; graph.fit(true); }
+    };
+    worker.postMessage({ n, edges, lobe }, [edges.buffer, lobe.buffer]);
+  }
+
+  function setProgress(v, label) {
+    const p = $('#progress');
+    if (v == null) { p.hidden = true; return; }
+    p.hidden = false;
+    p.querySelector('span').style.width = Math.round(Math.max(0.03, v) * 100) + '%';
+    if (label) p.querySelector('em').textContent = label;
+  }
+
+  function showTooltip(i, cx, cy) {
+    const t = $('#tooltip');
+    if (i == null || i < 0 || !map) { t.hidden = true; return; }
+    t.innerHTML = `${esc(map.nodes.label[i])}<small>${esc(map.files[map.nodes.file[i]] || '')}</small>`;
+    t.style.left = Math.min(cx + 14, window.innerWidth - 300) + 'px';
+    t.style.top = (cy + 14) + 'px';
+    t.hidden = false;
+  }
+
+  // ---------------------------------------------------------------- search --
+  let activeResult = -1;
+  function searchNodes(q) {
+    q = q.trim().toLowerCase();
+    if (!q || !map) return [];
+    const L = map.nodes.label, F = map.files, fi = map.nodes.file, deg = map.nodes.deg;
+    const hits = [];
+    for (let i = 0; i < L.length; i++) {
+      const l = L[i].toLowerCase();
+      let score = -1;
+      if (l === q) score = 3; else if (l.startsWith(q)) score = 2; else if (l.includes(q)) score = 1;
+      else if ((F[fi[i]] || '').toLowerCase().includes(q)) score = 0;
+      if (score >= 0) hits.push([score, deg[i], i]);
+    }
+    hits.sort((a, b) => b[0] - a[0] || b[1] - a[1]);
+    return hits.slice(0, 30).map(h => h[2]);
+  }
+
+  function renderResults(ids) {
+    const box = $('#results');
+    activeResult = -1;
+    if (!ids.length) {
+      box.innerHTML = $('#search').value.trim() ? '<div class="result"><span class="sub">No neurons match.</span></div>' : '';
+      box.hidden = !$('#search').value.trim();
+      return;
+    }
+    box.innerHTML = ids.map(i => {
+      const c = PALETTE[graph.col[i]];
+      return `<button class="result" role="option" data-i="${i}"><span class="dot" style="background:${c}"></span>
+        <span><span class="nm">${esc(map.nodes.label[i])}</span><span class="sub">${esc(map.files[map.nodes.file[i]] || '')}</span></span></button>`;
+    }).join('');
+    box.hidden = false;
+  }
+
+  let searchTimer = 0;
+  $('#search').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderResults(searchNodes($('#search').value)), map && map.nodes.label.length > 20000 ? 160 : 60);
+  });
+  $('#search').addEventListener('keydown', (e) => {
+    const items = [...document.querySelectorAll('#results .result[data-i]')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!items.length) return;
+      activeResult = (activeResult + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items.forEach((el, k) => el.classList.toggle('active', k === activeResult));
+      items[activeResult].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const el = items[Math.max(0, activeResult)];
+      if (el) pickResult(+el.dataset.i);
+    } else if (e.key === 'Escape') {
+      $('#results').hidden = true; $('#search').blur();
+    }
+  });
+  $('#results').addEventListener('click', (e) => {
+    const el = e.target.closest('.result[data-i]');
+    if (el) pickResult(+el.dataset.i);
+  });
+  function pickResult(i) {
+    $('#results').hidden = true;
+    $('#search').blur();                     // closes the phone keyboard
+    graph.select(i, { centre: true });
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('.search-wrap')) $('#results').hidden = true;
+  });
+
+  // ----------------------------------------------------------------- sheet --
+  function openSheet(mode, html) {
+    sheetMode = mode;
+    $('#sheet-body').innerHTML = html;
+    $('#sheet-body').scrollTop = 0;
+    const sh = $('#sheet');
+    sh.hidden = false;
+    $('#mapview').classList.add('with-panel');
+    $('#menu-lobes').classList.toggle('on', mode === 'lobes');
+    $('#menu-scan').classList.toggle('on', mode === 'scan');
+    layoutInsets();
+  }
+  function closeSheet() {
+    sheetMode = null;
+    $('#sheet').hidden = true;
+    $('#sheet').classList.remove('tall');
+    $('#mapview').classList.remove('with-panel');
+    $('#menu-lobes').classList.remove('on');
+    $('#menu-scan').classList.remove('on');
+    layoutInsets();
+  }
+  function layoutInsets() {
+    const sh = $('#sheet');
+    const h = !sh.hidden && isPhone() ? sh.getBoundingClientRect().height : 0;
+    $('.fabs').style.bottom = `calc(${h + 14}px + ${h ? '0px' : 'var(--safe-bottom)'})`;
+    if (graph) { graph.bottomInset = h; graph.draw(); }
+  }
+  $('#sheet-close').onclick = () => { if (graph && graph.selected >= 0) graph.select(-1); closeSheet(); };
+  $('#sheet-handle').onclick = () => { $('#sheet').classList.toggle('tall'); setTimeout(layoutInsets, 240); };
+  window.addEventListener('resize', layoutInsets);
+
+  const VERBS = {
+    calls: ['calls', 'is called by'], imports: ['imports', 'is imported by'],
+    imports_from: ['imports from', 'is imported by'], uses: ['uses', 'is used by'],
+    references: ['references', 'is referenced by'], inherits: ['inherits from', 'is inherited by'],
+    extends: ['extends', 'is extended by'], implements: ['implements', 'is implemented by'],
+    contains: ['contains', 'is inside'], method: ['has method', 'is a method of'],
+    defines: ['defines', 'is defined in'], includes: ['includes', 'is included by'],
+    rationale_for: ['explains', 'is explained by'], case_of: ['is a case of', 'has case'],
+    semantically_similar_to: ['is similar to', 'is similar to'], conceptually_related_to: ['relates to', 'relates to'],
+    references_doc: ['references', 'is referenced by'], tests: ['tests', 'is tested by'],
+  };
+  const verb = (rel, out) => {
+    if (VERBS[rel]) return VERBS[rel][out ? 0 : 1];
+    const r = rel.replace(/_/g, ' ');
+    return out ? r : `is linked (${r}) from`;
+  };
+
+  function lobeLabel(i) {
+    const c = map.nodes.lobe[i];
+    return graph.lobeName.get(c) || `Lobe ${c}`;
+  }
+
+  function connList(list, out) {
+    return list.slice(0, 200).map(({ node, rel }) =>
+      `<button class="conn" data-i="${node}"><span class="dot" style="background:${PALETTE[graph.col[node]]}"></span>
+        <span class="rel">${esc(verb(rel, out))}</span><span class="nm">${esc(map.nodes.label[node])}</span></button>`
+    ).join('') + (list.length > 200 ? `<p class="muted">+ ${list.length - 200} more</p>` : '');
+  }
+
+  function showNode(i) {
+    showTooltip(-1);
+    const N = map.nodes, file = map.files[N.file[i]] || '', loc = N.loc[i] || '';
+    const { out, inc } = graph.connections(i);
+    const html = `<h2>${esc(N.label[i])}</h2>
+      <p class="meta"><span class="dot" style="background:${PALETTE[graph.col[i]]}"></span>${esc(lobeLabel(i))} lobe
+        · ${fmt(out.length + inc.length)} synapses<br>${esc(file)}${loc ? ' · ' + esc(loc) : ''}</p>
+      <div class="actions">
+        <button class="btn" id="do-explain">Explain</button>
+        <button class="btn ghost" id="do-focus">Zoom to</button>
+      </div>
+      <div id="explain-box"></div>
+      ${out.length ? `<h3>Reaches out to (${fmt(out.length)})</h3>${connList(out, true)}` : ''}
+      ${inc.length ? `<h3>Reached by (${fmt(inc.length)})</h3>${connList(inc, false)}` : ''}
+      ${!out.length && !inc.length ? '<p class="muted">No synapses: this neuron stands alone.</p>' : ''}`;
+    openSheet('node', html);
+    $('#do-explain').onclick = () => {
+      $('#explain-box').innerHTML = `<div class="explain">${explain(i)}</div>`;
+      sheetMode = 'explain';
+    };
+    $('#do-focus').onclick = () => {
+      const ids = [...graph.focus];
+      graph.fit(true, ids);
+    };
+  }
+  $('#sheet-body').addEventListener('click', (e) => {
+    const el = e.target.closest('.conn[data-i]');
+    if (el && graph) graph.select(+el.dataset.i, { centre: true });
+  });
+
+  function names(list, k = 4) {
+    const seen = new Set(), xs = [];
+    for (const { node } of list) { const l = map.nodes.label[node]; if (!seen.has(l)) { seen.add(l); xs.push(l); } }
+    const shown = xs.slice(0, k).map(l => `<b>${esc(l)}</b>`);
+    const more = xs.length - shown.length;
+    if (more > 0) shown.push(`${more} more`);
+    return shown.length > 1 ? shown.slice(0, -1).join(', ') + ' and ' + shown[shown.length - 1] : shown[0];
+  }
+
+  // The same facts as `mybrain explain`, written as plain sentences.
+  function explain(i) {
+    const N = map.nodes, label = N.label[i], file = map.files[N.file[i]] || '';
+    const base = file.split('/').pop();
+    const { out, inc } = graph.connections(i);
+    const total = out.length + inc.length;
+    const kind = label === base ? 'a file' : /\(\)$/.test(label) ? 'a function' :
+      out.some(c => c.rel === 'method') ? 'a class' : 'a neuron';
+    const lobeSize = (map.lobes.find(l => l[0] === N.lobe[i]) || [0, '', 1])[2];
+    let txt = `<b>${esc(label)}</b> is ${kind}${file && label !== base ? ` in <code>${esc(file)}</code>` : file ? ` at <code>${esc(file)}</code>` : ''}${N.loc[i] ? ` (${esc(N.loc[i])})` : ''}. `;
+    txt += `It belongs to the <b>${esc(lobeLabel(i))}</b> lobe, together with ${fmt(Math.max(0, lobeSize - 1))} other neurons. `;
+    const group = (list) => { const g = new Map(); for (const c of list) { if (!g.has(c.rel)) g.set(c.rel, []); g.get(c.rel).push(c); } return g; };
+    const parts = [];
+    for (const [rel, list] of group(out)) parts.push(`it ${esc(verb(rel, true))} ${names(list)}`);
+    for (const [rel, list] of group(inc)) parts.push(`it ${esc(verb(rel, false))} ${names(list)}`);
+    if (parts.length) txt += 'In short: ' + parts.slice(0, 6).join('; ') + '. ';
+    // how central is it?
+    const better = map.nodes.deg.reduce((a, d) => a + (d > total ? 1 : 0), 0);
+    const pct = (100 * better) / map.nodes.deg.length;
+    if (pct < 1) txt += `With ${fmt(total)} synapses it is a <b>core neuron</b>: one of the most connected parts of the project.`;
+    else if (pct < 10) txt += `With ${fmt(total)} synapses it is busier than ${Math.round(100 - pct)}% of neurons.`;
+    else if (total <= 1) txt += 'It is barely connected, so it may be a leaf or unused.';
+    return txt;
+  }
+
+  // ----------------------------------------------------------------- lobes --
+  function showLobes() {
+    const rows = map.lobes.map(([c, name, size]) =>
+      `<label class="lobe-row" data-name="${esc(name.toLowerCase())}"><input type="checkbox" data-c="${c}" ${graph.hiddenLobes.has(c) ? '' : 'checked'}>
+        <span class="dot" style="background:${PALETTE[graph.lobeColor.get(c) ?? 9]}"></span>
+        <span class="nm">${esc(name)}</span><span class="cnt">${fmt(size)}</span></label>`).join('');
+    openSheet('lobes', `<h2>Lobes</h2><p class="meta">Groups of neurons that belong together. Untick to hide.</p>
+      <div class="lobe-tools"><input id="lobe-filter" type="search" placeholder="Filter lobes…" enterkeyhint="search" autocomplete="off">
+      <button class="btn ghost" id="lobes-all">All</button><button class="btn ghost" id="lobes-none">None</button></div>
+      <div id="lobe-rows">${rows}</div>`);
+    const apply = () => {
+      const hid = new Set();
+      document.querySelectorAll('#lobe-rows input').forEach(cb => { if (!cb.checked) hid.add(+cb.dataset.c); });
+      graph.setHiddenLobes(hid);
+    };
+    $('#lobe-rows').addEventListener('change', apply);
+    $('#lobes-all').onclick = () => { document.querySelectorAll('#lobe-rows input').forEach(cb => (cb.checked = true)); apply(); };
+    $('#lobes-none').onclick = () => { document.querySelectorAll('#lobe-rows input').forEach(cb => (cb.checked = false)); apply(); };
+    $('#lobe-filter').addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      document.querySelectorAll('#lobe-rows .lobe-row').forEach(r => { r.hidden = q && !r.dataset.name.includes(q); });
+    });
+  }
+  $('#menu-lobes').onclick = () => (sheetMode === 'lobes' ? closeSheet() : map && showLobes());
+
+  // ------------------------------------------------------------ brain scan --
+  function md(src) {
+    const inline = (s) => esc(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+      .replace(/(^|[\s(])_([^_]+)_(?=[\s).,]|$)/g, '$1<i>$2</i>');
+    const out = []; let list = null, para = [], code = null;
+    const flush = () => {
+      if (para.length) { out.push(`<p>${inline(para.join(' '))}</p>`); para = []; }
+      if (list) { out.push(`<${list.t}>${list.items.map(x => `<li>${inline(x)}</li>`).join('')}</${list.t}>`); list = null; }
+    };
+    for (const line of src.split('\n')) {
+      if (code !== null) {
+        if (line.startsWith('```')) { out.push(`<pre><code>${esc(code)}</code></pre>`); code = null; } else code += line + '\n';
+        continue;
+      }
+      if (line.startsWith('```')) { flush(); code = ''; continue; }
+      let m;
+      if ((m = line.match(/^(#{1,4})\s+(.*)/))) { flush(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); continue; }
+      if ((m = line.match(/^\s*[-*]\s+(.*)/))) { para.length && flush(); if (!list || list.t !== 'ul') { flush(); list = { t: 'ul', items: [] }; } list.items.push(m[1]); continue; }
+      if ((m = line.match(/^\s*\d+\.\s+(.*)/))) { para.length && flush(); if (!list || list.t !== 'ol') { flush(); list = { t: 'ol', items: [] }; } list.items.push(m[1]); continue; }
+      if (!line.trim()) { flush(); continue; }
+      if (list && /^\s{2,}/.test(line)) { list.items[list.items.length - 1] += ' ' + line.trim(); continue; }
+      if (list) flush();
+      para.push(line.trim());
+    }
+    flush();
+    return out.join('\n');
+  }
+
+  async function showScan() {
+    openSheet('scan', '<p class="muted">Loading Brain Scan…</p>');
+    $('#sheet').classList.add('tall');
+    if (reportText == null) {
+      try {
+        const r = await fetch(`maps/${encodeURIComponent(mapName)}/report.md`, { cache: 'no-cache', credentials: 'same-origin' });
+        reportText = r.ok ? await r.text() : '';
+      } catch (e) { reportText = ''; }
+    }
+    if (sheetMode !== 'scan') return;
+    // Very long reports: keep the phone snappy by rendering the first part.
+    const text = reportText.length > 120000 ? reportText.slice(0, 120000) + '\n\n_(report shortened)_' : reportText;
+    $('#sheet-body').innerHTML = `<div class="report">${text ? md(text) : '<p>No Brain Scan for this map.</p>'}</div>`;
+    setTimeout(layoutInsets, 240);
+  }
+  $('#menu-scan').onclick = () => (sheetMode === 'scan' ? closeSheet() : map && showScan());
+
+  // ----------------------------------------------------------------- misc --
+  $('#back').onclick = () => { location.hash = '#/'; };
+  $('#fit').onclick = () => graph && graph.fit(true);
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (graph) { graph.theme = themeNow(); graph.draw(); }
+  });
+
+  // Install as an app (Chrome/Edge/Android). iPhone: Share → Add to Home Screen.
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#install-btn').hidden = false; });
+  $('#install-btn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); installEvt = null; $('#install-btn').hidden = true; };
+
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  fetch('version.txt', { cache: 'no-cache' }).then(r => (r.ok ? r.text() : '')).then(v => { $('#version').textContent = v.trim(); }).catch(() => {});
+
+  route();
+})();

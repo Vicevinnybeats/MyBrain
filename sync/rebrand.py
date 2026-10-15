@@ -269,6 +269,9 @@ PATCHES: list[tuple[str, str, str]] = [
      "def test_claude_install_ships_lean_core_and_references(tmp_path):\n",
      "@__import__(\"pytest\").mark.skip(reason=\"MyBrain installs its own short skill for Claude Code\")\n"
      "def test_claude_install_ships_lean_core_and_references(tmp_path):\n"),
+    # 13. mybrain-publish: send a map to the web app (sync/overrides/mybrain/publish.py).
+    ("pyproject.toml", 'graphify-mcp = "graphify.serve:_main"\n',
+     'graphify-mcp = "graphify.serve:_main"\ngraphify-publish = "graphify.publish:main"\n'),
 ]
 
 # Applied to every text file BEFORE the generic rename (order matters).

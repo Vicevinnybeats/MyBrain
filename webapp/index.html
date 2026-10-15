@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MyBrain</title>
+<meta name="description" content="Your code, as a living map.">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MyBrain">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ============ Home: list of maps ============ -->
+<section id="home" class="view">
+  <header class="home-head">
+    <img src="icons/icon.svg" alt="" class="logo">
+    <div>
+      <h1>MyBrain</h1>
+      <p class="tag">Your code, as a living map</p>
+    </div>
+  </header>
+  <div id="map-list" class="map-list" aria-live="polite"></div>
+  <p id="home-empty" class="empty" hidden>
+    No maps yet. In Claude Code run <code>/mybrain</code> and then
+    <code>/mybrain publish</code>, or add the MyBrain workflow to a repo.
+  </p>
+  <footer class="home-foot">
+    <button id="install-btn" class="btn" hidden>Install app</button>
+    <span id="version" class="muted"></span>
+  </footer>
+</section>
+
+<!-- ============ Map view ============ -->
+<section id="mapview" class="view" hidden>
+  <canvas id="canvas" aria-label="Network map"></canvas>
+
+  <div class="topbar">
+    <button id="back" class="icon-btn" aria-label="All maps">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Search neurons…" autocomplete="off"
+             autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search"
+             aria-label="Search neurons">
+      <div id="results" class="results" role="listbox" hidden></div>
+    </div>
+    <button id="menu-lobes" class="icon-btn" aria-label="Lobes">
+      <svg viewBox="0 0 24 24"><circle cx="7" cy="8" r="3"/><circle cx="17" cy="8" r="3"/><circle cx="12" cy="17" r="3"/></svg>
+    </button>
+    <button id="menu-scan" class="icon-btn" aria-label="Brain Scan report">
+      <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z M14 3v5h5 M9 12h7 M9 16h7" /></svg>
+    </button>
+  </div>
+
+  <div id="map-title" class="map-title"></div>
+  <div id="progress" class="progress" hidden><span></span><em>Growing neurons…</em></div>
+
+  <div class="fabs">
+    <button id="fit" class="icon-btn" aria-label="Show whole map">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5"/></svg>
+    </button>
+  </div>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <!-- bottom sheet (phone) / side panel (desktop) -->
+  <aside id="sheet" class="sheet" aria-live="polite" hidden>
+    <button id="sheet-handle" class="sheet-handle" aria-label="Expand or collapse"><span></span></button>
+    <button id="sheet-close" class="icon-btn sheet-close" aria-label="Close">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div id="sheet-body" class="sheet-body"></div>
+  </aside>
+</section>
+
+<script src="graph.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
