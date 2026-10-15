@@ -9,6 +9,7 @@
   const themeNow = () => (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
 
   let graph = null, map = null, worker = null, mapName = null, reportText = null, sheetMode = null;
+  let pathFrom = -1;
 
   // ------------------------------------------------------------ tiny cache --
   // Finished layouts are kept in IndexedDB so a map opens instantly next time.
@@ -92,6 +93,7 @@
 
   // --------------------------------------------------------------- map view --
   function closeMap() {
+    stopPath();
     if (worker) { worker.terminate(); worker = null; }
     if (graph) { graph.destroy(); graph = null; window.__mybrain = null; }
     map = null; mapName = null; reportText = null;
@@ -124,10 +126,15 @@
 
     graph = new window.BrainGraph($('#canvas'), map, {
       theme: themeNow(),
-      onSelect: (i) => (i >= 0 ? showNode(i) : (sheetMode === 'node' || sheetMode === 'explain') && closeSheet()),
+      onSelect: (i) => {
+        if (i >= 0 && pathFrom >= 0 && i !== pathFrom) { showPath(pathFrom, i); return; }
+        if (i >= 0) showNode(i);
+        else if (sheetMode === 'node' || sheetMode === 'explain' || sheetMode === 'path') closeSheet();
+      },
       onHover: showTooltip,
     });
     window.__mybrain = graph;   // handy for debugging / tests
+    applyAnim();
 
     const key = `${name}@${map.published}`;
     const cached = await idb.get(key);
@@ -314,6 +321,7 @@
       <div class="actions">
         <button class="btn" id="do-explain">Explain</button>
         <button class="btn ghost" id="do-focus">Zoom to</button>
+        <button class="btn ghost" id="do-path">Path from here</button>
       </div>
       <div id="explain-box"></div>
       ${out.length ? `<h3>Reaches out to (${fmt(out.length)})</h3>${connList(out, true)}` : ''}
@@ -324,11 +332,50 @@
       $('#explain-box').innerHTML = `<div class="explain">${explain(i)}</div>`;
       sheetMode = 'explain';
     };
+    $('#do-path').onclick = () => startPath(i);
     $('#do-focus').onclick = () => {
       const ids = [...graph.focus];
       graph.fit(true, ids);
     };
   }
+  // ------------------------------------------------------------------ path --
+  // Like `mybrain path "A" "B"`: pick a start, then tap or search the end.
+  function startPath(i) {
+    pathFrom = i;
+    closeSheet();
+    $('#toast-text').innerHTML = `Path from <b>${esc(map.nodes.label[i])}</b>: tap or search the end`;
+    $('#toast').hidden = false;
+  }
+  function stopPath() { pathFrom = -1; $('#toast').hidden = true; }
+  $('#toast-cancel').onclick = () => { stopPath(); if (graph) graph.select(-1); };
+
+  function showPath(a, b) {
+    stopPath();
+    const p = graph.findPath(a, b);
+    const L = map.nodes.label;
+    if (!p) {
+      graph.select(b);
+      openSheet('path', `<h2>No path</h2><p class="meta"><b>${esc(L[a])}</b> and <b>${esc(L[b])}</b> are not connected by any chain of synapses.</p>`);
+      return;
+    }
+    let cli = `<b>${esc(L[p.nodes[0]])}</b>\n`, rows = '';
+    p.nodes.forEach((n, k) => {
+      rows += `<button class="conn" data-i="${n}"><span class="dot" style="background:${PALETTE[graph.col[n]]}"></span><span class="nm">${esc(L[n])}</span></button>`;
+      if (k < p.edges.length) {
+        const e = p.edges[k], rel = map.rels[graph.er[e]], forward = graph.es[e] === n;
+        const arrow = forward ? `--${rel}-->` : `<--${rel}--`;
+        rows += `<span class="hop-rel">${esc(arrow)}</span>`;
+        cli += `  ${esc(arrow)} <b>${esc(L[p.nodes[k + 1]])}</b>\n`;
+      }
+    });
+    const hops = p.edges.length;
+    openSheet('path', `<h2>${esc(L[a])} → ${esc(L[b])}</h2>
+      <p class="meta">Shortest path: ${hops} hop${hops === 1 ? '' : 's'}. Zero files opened.</p>
+      <div class="path-cli">${cli.trim()}</div>
+      <h3>Neurons on the way</h3>${rows}`);
+    graph.setPath(p);                  // after the sheet opens, so it frames the space above it
+  }
+
   $('#sheet-body').addEventListener('click', (e) => {
     const el = e.target.closest('.conn[data-i]');
     if (el && graph) graph.select(+el.dataset.i, { centre: true });
@@ -440,9 +487,95 @@
   }
   $('#menu-scan').onclick = () => (sheetMode === 'scan' ? closeSheet() : map && showScan());
 
+  // ------------------------------------------------------------- + add map --
+  // Asks the server to run the "Add a map" workflow in the maps repository.
+  const KEY = 'mybrain-key';
+  const getKey = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+  const setKey = (k) => { try { localStorage.setItem(KEY, k); } catch (e) { /* private mode */ } };
+  let runTimer = 0, knownMaps = 0;
+
+  async function apiCall(path, opts = {}) {
+    const headers = { 'content-type': 'application/json' };
+    const k = getKey();
+    if (k) headers['x-mybrain-key'] = k;
+    const r = await fetch(path, { credentials: 'same-origin', ...opts, headers });
+    let data = {};
+    try { data = await r.json(); } catch (e) { /* not json */ }
+    return { status: r.status, data };
+  }
+
+  function ago2(iso) { return ago(iso) || ''; }
+
+  async function refreshRuns() {
+    const { status, data } = await apiCall('api/status');
+    const box = $('#add-runs');
+    if (status !== 200 || !data.runs) { box.innerHTML = ''; return; }
+    box.innerHTML = data.runs.slice(0, 5).map(r => {
+      const st = r.status !== 'completed' ? ['⏳ mapping…', ''] : r.conclusion === 'success' ? ['✓ ready', 'ok'] : ['✗ ' + (r.conclusion || 'failed'), 'bad'];
+      return `<div class="run"><span>${esc(r.title.replace(/^Map /, ''))} <span class="muted">${esc(ago2(r.created))}</span></span><span class="st ${st[1]}">${st[0]}</span></div>`;
+    }).join('');
+    const busy = data.runs.some(r => r.status !== 'completed');
+    if (!busy) { clearInterval(runTimer); runTimer = 0; showHome(); }
+  }
+
+  function watchRuns() {
+    clearInterval(runTimer);
+    runTimer = setInterval(refreshRuns, 15000);
+    refreshRuns();
+  }
+
+  $('#add-btn').onclick = () => {
+    const p = $('#add-panel');
+    p.hidden = !p.hidden;
+    if (!p.hidden) { $('#add-msg').textContent = ''; $('#add-repo').focus(); refreshRuns(); }
+  };
+  $('#add-cancel').onclick = () => { $('#add-panel').hidden = true; };
+  $('#add-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const repo = $('#add-repo').value.trim();
+    const keyBox = $('#add-key');
+    if (!keyBox.hidden && keyBox.value.trim()) setKey(keyBox.value.trim());
+    if (!repo) { $('#add-msg').textContent = 'Type a GitHub repository, like Vicevinnybeats/Cardly.'; return; }
+    $('#add-msg').textContent = 'Starting…';
+    let res;
+    try { res = await apiCall('api/add', { method: 'POST', body: JSON.stringify({ repo }) }); }
+    catch (err) { $('#add-msg').textContent = 'You seem to be offline.'; return; }
+    const { status, data } = res;
+    if (status === 200) {
+      $('#add-msg').innerHTML = `Mapping <b>${esc(data.repo)}</b>… usually 2–5 minutes. It appears in your list by itself.`;
+      $('#add-repo').value = '';
+      keyBox.hidden = true;
+      watchRuns();
+    } else if (status === 401) {
+      keyBox.hidden = false; keyBox.focus();
+      $('#add-msg').textContent = data.needKey ? 'Enter your MyBrain key (only needed once on this device).'
+        : 'The + button is locked: set an ADD_KEY secret or turn on Cloudflare Access (see README).';
+    } else if (status === 503) {
+      $('#add-msg').textContent = 'Almost there: add the GITHUB_TOKEN secret to the mybrain Worker (see README).';
+    } else if (status === 400) {
+      $('#add-msg').textContent = data.message || 'That does not look like owner/name.';
+    } else if (status === 404 || status === 405 || status === 501) {
+      $('#add-msg').textContent = 'This app version has no + server yet. It arrives with the next build.';
+    } else {
+      $('#add-msg').textContent = `GitHub said no (${data.status || status}). Check the token's permissions.`;
+    }
+  });
+
   // ----------------------------------------------------------------- misc --
   $('#back').onclick = () => { location.hash = '#/'; };
   $('#fit').onclick = () => graph && graph.fit(true);
+  // Firing-signal animation: on by default, remembered per device.
+  const animPref = () => { try { return localStorage.getItem('mybrain-anim'); } catch (e) { return null; } };
+  function applyAnim() {
+    const on = animPref() !== 'off' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches && animPref() !== 'on');
+    $('#anim').classList.toggle('on', on);
+    if (graph) graph.setAnimate(on);
+  }
+  $('#anim').onclick = () => {
+    const on = !$('#anim').classList.contains('on');
+    try { localStorage.setItem('mybrain-anim', on ? 'on' : 'off'); } catch (e) { /* private mode */ }
+    applyAnim();
+  };
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
     if (graph) { graph.theme = themeNow(); graph.draw(); }
   });

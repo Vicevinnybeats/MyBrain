@@ -8,6 +8,8 @@
 (function () {
   'use strict';
 
+  const NODE_K = 0.78;                  // neuron size on screen
+  const SIGNAL = '#5eead4';             // colour of firing signals and paths
   const PALETTE = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#59A14F',
                    '#EDC948', '#B07AA1', '#FF9DA7', '#9C755F', '#BAB0AC'];
 
@@ -71,11 +73,18 @@
       this.hiddenLobes = new Set();
       this.selected = -1;
       this.focus = null;                       // Set of highlighted neuron ids
+      this.path = null;                        // {nodes, edges} of a shown path
       this.scale = 1; this.tx = 0; this.ty = 0;
       this.interacting = false;
       this._drawQueued = false;
       this._lobeCentres = null;
 
+      this.animate = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      this.pulses = [];
+      this._glows = new Map();
+      this._frame = (t) => this._tick(t);
+      this._vis = () => { if (!document.hidden) this._kick(); };
+      document.addEventListener('visibilitychange', this._vis);
       this._resize = this.resize.bind(this);
       window.addEventListener('resize', this._resize);
       this.resize();
@@ -83,6 +92,8 @@
     }
 
     destroy() {
+      this._destroyed = true;
+      document.removeEventListener('visibilitychange', this._vis);
       window.removeEventListener('resize', this._resize);
       this._unbind && this._unbind();
     }
@@ -90,7 +101,7 @@
     // ---------------------------------------------------------------- layout --
     setPositions(pos, fit) {
       for (let i = 0; i < this.n; i++) { this.x[i] = pos[2 * i]; this.y[i] = pos[2 * i + 1]; }
-      this._lobeCentres = null;
+      this._lobeCentres = null; this._cores = null;
       if (!this.hasLayout || fit) this.fit(false);
       this.hasLayout = true;
       this.draw();
@@ -141,8 +152,8 @@
         this.scale = Math.exp(Math.log(s0) + (Math.log(s) - Math.log(s0)) * e);
         this.tx = x0 + (tx - x0) * e; this.ty = y0 + (ty - y0) * e;
         this.interacting = k < 1; this.cameraOnly = true;
-        this._render();
-        if (k < 1) requestAnimationFrame(step); else this.draw();
+        this.draw();
+        if (k < 1) requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
     }
@@ -155,6 +166,8 @@
     // ------------------------------------------------------------- selection --
     select(i, opts = {}) {
       this.selected = i;
+      this.path = null;
+      this.pulses = [];
       if (i < 0) { this.focus = null; this.draw(); this.onSelect(-1); return; }
       const f = new Set([i]);
       for (let k = this.adjStart[i]; k < this.adjStart[i + 1]; k++) {
@@ -164,6 +177,42 @@
       if (opts.centre) this.centreOn(i);
       this.draw();
       this.onSelect(i);
+    }
+
+    // Shortest chain of synapses between two neurons, ignoring direction
+    // (like `mybrain path --undirected`). Returns null when not connected.
+    findPath(a, b) {
+      if (a === b) return { nodes: [a], edges: [] };
+      const prevE = new Int32Array(this.n).fill(-1), seen = new Uint8Array(this.n);
+      let q = [a]; seen[a] = 1;
+      while (q.length && !seen[b]) {
+        const nq = [];
+        for (const u of q) {
+          for (let k = this.adjStart[u]; k < this.adjStart[u + 1]; k++) {
+            const e = this.adj[k], v = this.es[e] === u ? this.et[e] : this.es[e];
+            if (seen[v]) continue;
+            seen[v] = 1; prevE[v] = e; nq.push(v);
+          }
+        }
+        q = nq;
+      }
+      if (!seen[b]) return null;
+      const nodes = [b], edges = [];
+      for (let v = b; v !== a;) {
+        const e = prevE[v]; edges.push(e);
+        v = this.es[e] === v ? this.et[e] : this.es[e];
+        nodes.push(v);
+      }
+      return { nodes: nodes.reverse(), edges: edges.reverse() };
+    }
+
+    setPath(p) {
+      this.path = p;
+      this.pulses = [];
+      this.selected = -1;
+      this.focus = p ? new Set(p.nodes) : null;
+      if (p) this.fit(true, p.nodes);
+      this.draw();
     }
 
     connections(i) {
@@ -193,10 +242,145 @@
       this.draw();
     }
 
-    draw() {
-      if (this._drawQueued) return;
-      this._drawQueued = true;
-      requestAnimationFrame(() => { this._drawQueued = false; this._render(); });
+    // Rendering is driven by one loop: full redraws when something changed,
+    // otherwise the last full frame is reused and only the animation layer
+    // (firing signals, breathing core neurons) is drawn on top.
+    draw() { this._dirty = true; this._kick(); }
+
+    _kick() {
+      if (this._loopOn || this._destroyed) return;
+      this._loopOn = true;
+      requestAnimationFrame(this._frame);
+    }
+
+    _tick(now) {
+      this._loopOn = false;
+      if (this._destroyed) return;
+      const anim = this.animate && this.hasLayout && !document.hidden;
+      if (this._dirty) { this._dirty = false; this._render(); }
+      else if (anim) {
+        if (this.interacting || !this._snap) this._render();
+        else {
+          const ctx = this.ctx;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(this._snap.canvas, 0, 0);
+        }
+      }
+      if (anim) {
+        this._overlay(now);
+        this._loopOn = true;
+        requestAnimationFrame(this._frame);
+      }
+    }
+
+    setAnimate(on) { this.animate = on; this.pulses = []; this.draw(); }
+
+    _glow(color) {
+      let g = this._glows.get(color);
+      if (g) return g;
+      g = document.createElement('canvas'); g.width = g.height = 64;
+      const c = g.getContext('2d'), rg = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+      rg.addColorStop(0, '#ffffff'); rg.addColorStop(0.18, color);
+      rg.addColorStop(0.5, color + '55'); rg.addColorStop(1, color + '00');
+      c.fillStyle = rg; c.fillRect(0, 0, 64, 64);
+      this._glows.set(color, g);
+      return g;
+    }
+
+    _spawn(now) {
+      const small = this.W < 600;
+      const want = this.path ? 6 : this.selected >= 0 ? (small ? 18 : 30) : (small ? 34 : 70);
+      const s = this.scale, tx = this.tx, ty = this.ty, X = this.x, Y = this.y;
+      const onScreen = (i) => {
+        const sx = X[i] * s + tx, sy = Y[i] * s + ty;
+        return sx > -20 && sy > -20 && sx < this.W + 20 && sy < this.H + 20 &&
+          !(this.hiddenLobes.size && this.hiddenLobes.has(this.lobe[i]));
+      };
+      let budget = 4;
+      while (this.pulses.length < want && budget-- > 0) {
+        let e = -1, from = -1;
+        if (this.path) {
+          if (this.pulses.some(p => p.path)) break;
+          this.pulses.push({ path: true, k: 0, t: 0, dur: 520 });
+          break;
+        } else if (this.selected >= 0) {
+          const i = this.selected, d = this.adjStart[i + 1] - this.adjStart[i];
+          if (!d) break;
+          e = this.adj[this.adjStart[i] + Math.floor(Math.random() * d)]; from = i;
+        } else {
+          for (let tries = 0; tries < 12; tries++) {
+            const c = Math.floor(Math.random() * this.E);
+            if (onScreen(this.es[c]) || onScreen(this.et[c])) { e = c; break; }
+          }
+          if (e < 0) break;
+          from = Math.random() < 0.5 ? this.es[e] : this.et[e];
+        }
+        const to = this.es[e] === from ? this.et[e] : this.es[e];
+        this.pulses.push({ a: from, b: to, t: 0, dur: 650 + Math.random() * 900, born: now });
+      }
+    }
+
+    _overlay(now) {
+      const dt = Math.min(64, now - (this._last || now));
+      this._last = now;
+      const ctx = this.ctx, dpr = this.dpr, s = this.scale, tx = this.tx, ty = this.ty, X = this.x, Y = this.y;
+      const dark = this.theme === 'dark';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+      const rScale = Math.sqrt(s);
+
+      // breathing core neurons
+      if (!this.focus) {
+        const cores = this._cores || (this._cores = this.byDeg.slice(0, 24));
+        for (let k = 0; k < cores.length; k++) {
+          const i = cores[k];
+          if (this.hiddenLobes.size && this.hiddenLobes.has(this.lobe[i])) continue;
+          const sx = X[i] * s + tx, sy = Y[i] * s + ty;
+          if (sx < -40 || sy < -40 || sx > this.W + 40 || sy > this.H + 40) continue;
+          const r = Math.max(9, this.rw[i] * rScale * NODE_K * 3.2);
+          ctx.globalAlpha = 0.22 + 0.2 * Math.sin(now / 700 + k * 1.7);
+          ctx.drawImage(this._glow(PALETTE[this.col[i]]), sx - r, sy - r, 2 * r, 2 * r);
+        }
+      }
+
+      // firing signals
+      this._spawn(now);
+      const size = Math.max(5, Math.min(11, 7 * rScale));
+      const keep = [];
+      for (const p of this.pulses) {
+        p.t += dt / p.dur;
+        let a, b, t = Math.min(1, p.t), color;
+        if (p.path) {
+          if (!this.path) continue;
+          if (t >= 1) { p.k++; p.t = 0; t = 0; if (p.k >= this.path.edges.length) { p.k = 0; } }
+          a = this.path.nodes[p.k]; b = this.path.nodes[p.k + 1];
+          color = SIGNAL;
+        } else {
+          a = p.a; b = p.b;
+          color = this.selected >= 0 ? SIGNAL : PALETTE[this.col[a]];
+        }
+        const ax = X[a] * s + tx, ay = Y[a] * s + ty, bx = X[b] * s + tx, by = Y[b] * s + ty;
+        const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        const px = ax + (bx - ax) * e, py = ay + (by - ay) * e;
+        const t0 = Math.max(0, e - 0.22), qx = ax + (bx - ax) * t0, qy = ay + (by - ay) * t0;
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.2, size / 4);
+        ctx.beginPath(); ctx.moveTo(qx, qy); ctx.lineTo(px, py); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.drawImage(this._glow(color), px - size, py - size, 2 * size, 2 * size);
+        if (!p.path && p.t >= 1) {                     // arrival spark
+          const k = Math.min(1, (p.t - 1) * p.dur / 380);
+          ctx.globalAlpha = 1 - k;
+          const r = size * (1 + 2.2 * k);
+          ctx.drawImage(this._glow(color), bx - r, by - r, 2 * r, 2 * r);
+          if (k < 1) keep.push(p);
+          continue;
+        }
+        keep.push(p);
+      }
+      this.pulses = keep;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
     }
 
     _colors() {
@@ -205,7 +389,7 @@
         bg: dark ? '#0f0f1a' : '#ffffff',
         label: dark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.92)',
         halo: dark ? 'rgba(15,15,26,0.85)' : 'rgba(255,255,255,0.85)',
-        edgeAlpha: dark ? 0.22 : 0.28,
+        edgeAlpha: dark ? 0.38 : 0.42,
         lobeLabel: dark ? 'rgba(255,255,255,0.75)' : 'rgba(20,20,30,0.75)',
       };
     }
@@ -257,9 +441,9 @@
       const heavy = this.E > 12000;
       const skipEdges = this.interacting && heavy;
       if (!skipEdges) {
-        const lw = Math.max(0.35, Math.min(1.2, 0.5 * Math.sqrt(s)));
+        const lw = Math.max(0.6, Math.min(1.8, 0.75 * Math.sqrt(s)));
         ctx.lineWidth = lw;
-        ctx.globalAlpha = focus ? 0.05 : (heavy ? C.edgeAlpha * 0.7 : C.edgeAlpha);
+        ctx.globalAlpha = focus ? 0.05 : (heavy ? C.edgeAlpha * 0.8 : C.edgeAlpha);
         // bucket by source colour: one path per colour
         const paths = [];
         for (let k = 0; k < PALETTE.length; k++) paths.push(new Path2D());
@@ -286,6 +470,19 @@
           }
           ctx.stroke();
         }
+        if (this.path) {                      // glowing path, like the CLI demo
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = '#5eead4';
+          ctx.shadowColor = '#5eead4'; ctx.shadowBlur = 10;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          for (const e of this.path.edges) {
+            const a = es[e], b = et[e];
+            ctx.moveTo(X[a] * s + tx, Y[a] * s + ty); ctx.lineTo(X[b] * s + tx, Y[b] * s + ty);
+          }
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
       }
 
       // ---- neurons
@@ -299,7 +496,7 @@
         if (!vis(i)) continue;
         if (focus && focus.has(i)) continue;      // drawn on top below
         const sx = X[i] * s + tx, sy = Y[i] * s + ty;
-        const r = Math.max(1.1, this.rw[i] * rScale * 0.6);
+        const r = Math.max(1.6, this.rw[i] * rScale * NODE_K);
         const k = this.col[i];
         if (r < 2.2) rects[k].rect(sx - r, sy - r, 2 * r, 2 * r);
         else { arcs[k].moveTo(sx + r, sy); arcs[k].arc(sx, sy, r, 0, 6.2832); }
@@ -315,11 +512,16 @@
         for (const i of focus) {
           if (hasHidden && hidden.has(this.lobe[i])) continue;
           const sx = X[i] * s + tx, sy = Y[i] * s + ty;
-          const r = Math.max(2.5, this.rw[i] * rScale * 0.6) * (i === this.selected ? 1.6 : 1.1);
+          const r = Math.max(2.5, this.rw[i] * rScale * NODE_K) * (i === this.selected ? 1.6 : 1.1);
           ctx.fillStyle = PALETTE[this.col[i]];
           ctx.beginPath(); ctx.arc(sx, sy, r, 0, 6.2832); ctx.fill();
           if (i === this.selected) {
             ctx.lineWidth = 2.5; ctx.strokeStyle = C.label; ctx.stroke();
+          }
+          if (this.path) {
+            ctx.shadowColor = '#5eead4'; ctx.shadowBlur = 14;
+            ctx.lineWidth = 2; ctx.strokeStyle = '#5eead4'; ctx.stroke();
+            ctx.shadowBlur = 0;
           }
         }
       }
@@ -330,7 +532,7 @@
       this.lastShown = shown;
       if (!this.interacting) {
         this.fullMs = this.lastFrameMs;
-        if (this.n > 6000 || this.fullMs > 25) {
+        {
           let c = this._snap && this._snap.canvas;
           if (!c || c.width !== this.canvas.width || c.height !== this.canvas.height) {
             c = document.createElement('canvas');
@@ -360,8 +562,8 @@
       const drawText = (txt, sx, sy, font, color) => {
         ctx.font = font;
         const w = ctx.measureText(txt).width;
-        if (!place(sx, sy, w + 6, 14)) return false;
-        ctx.lineWidth = 3; ctx.strokeStyle = C.halo; ctx.strokeText(txt, sx, sy);
+        if (!place(sx, sy, w + 6, 17)) return false;
+        ctx.lineWidth = 3.5; ctx.strokeStyle = C.halo; ctx.strokeText(txt, sx, sy);
         ctx.fillStyle = color; ctx.fillText(txt, sx, sy);
         return true;
       };
@@ -372,18 +574,19 @@
       // selection first
       if (this.focus) {
         const sel = this.selected;
-        const order = [sel, ...[...this.focus].filter(i => i !== sel).sort((a, b) => this.deg[b] - this.deg[a])];
+        const order = this.path ? this.path.nodes :
+          [sel, ...[...this.focus].filter(i => i !== sel).sort((a, b) => this.deg[b] - this.deg[a])];
         for (const i of order.slice(0, small ? 30 : 60)) {
           if (!vis(i)) continue;
-          const r = Math.max(2.5, this.rw[i] * rScale * 0.6);
+          const r = Math.max(2.5, this.rw[i] * rScale * NODE_K);
           drawText(trim(L[i]), X[i] * s + tx, Y[i] * s + ty - r - 4,
-            i === sel ? '600 13px system-ui, sans-serif' : '11px system-ui, sans-serif', C.label);
+            i === sel || this.path ? '600 15px system-ui, sans-serif' : '13px system-ui, sans-serif', C.label);
         }
         return;
       }
 
       // zoomed out: lobe names at their centres
-      const zoomedOut = 6.5 * rScale * 0.6 < 4;     // a typical neuron is tiny on screen
+      const zoomedOut = 6.5 * rScale * NODE_K < 5;     // a typical neuron is tiny on screen
       if (zoomedOut) {
         if (!this._lobeCentres) this._lobeCentres = this._lobeCentresCompute();
         for (const c of this._lobeCentres) {
@@ -393,7 +596,7 @@
           if (sx < 0 || sy < 0 || sx > this.W || sy > this.H) continue;
           if (c.size < 3) continue;                        // tiny lobes: no name
           const nm = this.lobeName.get(c.c) || '';
-          if (drawText(trim(nm), sx, sy, '600 12px system-ui, sans-serif', C.lobeLabel)) placed++;
+          if (drawText(trim(nm), sx, sy, '600 14px system-ui, sans-serif', C.lobeLabel)) placed++;
         }
         return;
       }
@@ -402,11 +605,11 @@
       for (let k = 0; k < scanMax && placed < cap; k++) {
         const i = this.byDeg[k];
         if (!vis(i)) continue;
-        const r = Math.max(1.1, this.rw[i] * rScale * 0.6);
+        const r = Math.max(1.6, this.rw[i] * rScale * NODE_K);
         if (r < 3) continue;
         const sx = X[i] * s + tx, sy = Y[i] * s + ty;
         if (sx < 0 || sy < 0 || sx > this.W || sy > this.H) continue;
-        if (drawText(trim(L[i]), sx, sy - r - 3, '11px system-ui, sans-serif', C.label)) placed++;
+        if (drawText(trim(L[i]), sx, sy - r - 3, '13px system-ui, sans-serif', C.label)) placed++;
       }
     }
 
@@ -420,7 +623,7 @@
         if (this.hiddenLobes.size && this.hiddenLobes.has(this.lobe[i])) continue;
         const dx = this.x[i] - wx, dy = this.y[i] - wy;
         const d = dx * dx + dy * dy;
-        const r = Math.max(1.1, this.rw[i] * rScale * 0.6) / s + tol;
+        const r = Math.max(1.6, this.rw[i] * rScale * NODE_K) / s + tol;
         if (d < r * r && d < bestD) { bestD = d; best = i; }
       }
       return best;

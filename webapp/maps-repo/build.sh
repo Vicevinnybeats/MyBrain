@@ -5,3 +5,4 @@ set -e
 rm -rf .mybrain dist
 git clone --depth 1 "${MYBRAIN_REPO:-https://github.com/Vicevinnybeats/MyBrain}" .mybrain
 python3 .mybrain/webapp/build.py --maps . --out dist
+cp .mybrain/webapp/worker.js worker.js

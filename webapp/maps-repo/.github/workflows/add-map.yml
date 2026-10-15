@@ -1,0 +1,62 @@
+# Started by the "+" button in the MyBrain app (or by hand: Actions → Add a map → Run).
+# Clones a GitHub repository, builds its code map (free, no AI) and adds it here.
+name: Add a map
+run-name: "Map ${{ inputs.repo }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "GitHub repository, as owner/name"
+        required: true
+
+concurrency:
+  group: add-map-${{ inputs.repo }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install MyBrain
+        run: uv tool install "git+https://github.com/Vicevinnybeats/MyBrain"
+
+      - name: Fetch the project
+        env:
+          REPO: ${{ inputs.repo }}
+          READ_TOKEN: ${{ secrets.MYBRAIN_READ_TOKEN }}
+        run: |
+          case "$REPO" in
+            */*/*|*..*|*[!A-Za-z0-9._/-]*) echo "::error::Not a repository name: $REPO"; exit 1;;
+            */*) ;;
+            *) echo "::error::Use owner/name"; exit 1;;
+          esac
+          if [ -n "$READ_TOKEN" ]; then
+            url="https://x-access-token:${READ_TOKEN}@github.com/${REPO}.git"
+          else
+            url="https://github.com/${REPO}.git"
+          fi
+          if ! git clone --depth 1 "$url" project 2>clone.err; then
+            sed "s/${READ_TOKEN:-__none__}/***/g" clone.err
+            echo "::error::Could not clone $REPO. Private repo? Add the MYBRAIN_READ_TOKEN secret to mybrain-maps."
+            exit 1
+          fi
+
+      - name: Build the map (code only, free)
+        run: cd project && mybrain update .
+
+      - name: Publish
+        env:
+          REPO: ${{ inputs.repo }}
+        run: |
+          git config user.name "MyBrain"
+          git config user.email "mybrain@users.noreply.github.com"
+          MYBRAIN_MAPS_DIR="$PWD" mybrain-publish project --name "${REPO##*/}"

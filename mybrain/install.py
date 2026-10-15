@@ -552,6 +552,11 @@ def _skill_registration(skill_path: str = "~/.claude/skills/mybrain/SKILL.md") -
         "- any input to knowledge graph. Trigger: `/mybrain`\n"
         "When the user types `/mybrain`, use the installed mybrain skill "
         "or instructions before doing anything else.\n"
+        "Use it automatically (free, local, no AI) to save tokens:\n"
+        "- Before exploring a codebase to answer how it works, where something lives or what calls what: if `mybrain-out/graph.json` is missing in the repo root, run `mybrain update .` once (seconds to ~2 min), then ask the map first with `mybrain query \"<question>\"`, `mybrain path \"A\" \"B\"` or `mybrain explain \"X\"`; read raw files only where the map points.\n"
+        "- Skip it for tiny tasks (one known file, a typo, a config value).\n"
+        "- After larger code changes, run `mybrain update .` again.\n"
+        "- Keep mybrain-out/ out of commits: add it to .git/info/exclude.\n"
     )
 def _shown_path(path: Path) -> str:
     """Name *path* for install/uninstall output, plus the file it points to when it

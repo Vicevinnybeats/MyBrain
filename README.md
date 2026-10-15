@@ -82,8 +82,17 @@ and **Explain**, search from the top bar, filter **Lobes**, and read the
 
 - **Phone:** open the app link in Safari or Chrome, then use **Share → Add to
   Home Screen** (iPhone) or **⋮ → Install app** (Android).
-- **Desktop:** Chrome or Edge show an **Install** icon in the address bar.
+- **Windows:** download [`desktop/MyBrain.exe`](desktop/MyBrain.exe) and
+  double-click it. It opens MyBrain in its own window (Edge or Chrome app
+  mode). Right-click it → **Pin to taskbar**. Windows may say "unknown
+  publisher" the first time: **More info → Run anyway**.
+- **Desktop browser:** Chrome or Edge also show an **Install** icon in the
+  address bar.
 - It works offline for maps you've already opened.
+
+**In a map:** the ⚡ button turns the firing-signal animation on or off. Tap
+a neuron → **Path from here** → tap or search a second neuron to see the
+shortest chain of synapses between them, like `mybrain path`.
 
 ### One-time hosting setup (free, about 10 minutes)
 
@@ -106,6 +115,28 @@ login code.
 
 You never paste passwords or tokens into a chat: all of this happens on the
 Cloudflare and GitHub websites.
+
+### The + button (add a project from the app)
+
+The **+** on the home screen maps any GitHub repo for you in 2–5 minutes.
+It needs three one-time settings. All of them are made on the GitHub and
+Cloudflare websites; never paste a token into a chat.
+
+1. **Token for the + button.** github.com → Settings → Developer settings →
+   Personal access tokens → **Fine-grained tokens** → Generate new token.
+   Name it `MyBrain app`, then **Only select repositories** → `mybrain-maps`.
+   Under Permissions → Repository permissions, set **Actions** to **Read and
+   write**. Generate it and copy it.
+2. **Give it to the app.** Cloudflare → Workers & Pages → `mybrain` →
+   **Settings** → **Variables and Secrets** → **Add**. Type: **Secret**,
+   name: `GITHUB_TOKEN`, value: the token. Save.
+3. **Protect the + button.** Either turn on **Access** (see step 3 above), or
+   add a second secret named `ADD_KEY` with a passphrase you make up. The
+   app asks for it once per device.
+4. **Optional, for private repos:** make a read-only token (Fine-grained,
+   **All repositories**, **Contents: Read-only**) and add it in GitHub →
+   `mybrain-maps` → Settings → Secrets and variables → Actions → New
+   repository secret named `MYBRAIN_READ_TOKEN`. Public repos work without it.
 
 ### Send a map to the app
 
@@ -137,6 +168,17 @@ write to `mybrain-maps`.
    token into your password manager.
 2. In each repo: **Settings** → **Secrets and variables** → **Actions** →
    **New repository secret**. Name it `MYBRAIN_MAPS_TOKEN` and paste the token.
+
+---
+
+## Does Claude use the brain automatically?
+
+Yes, once the Setup script has run (it runs in every new cloud session).
+`mybrain install` adds rules to Claude's global instructions: before
+exploring a codebase, Claude builds the map if it's missing (`mybrain update .`,
+free) and asks the map first (`query`, `path`, `explain`). It only reads the
+files the map points to, which saves tokens. You don't have to type anything.
+Type `/mybrain` when you want a summary or a fresh map on demand.
 
 ---
 

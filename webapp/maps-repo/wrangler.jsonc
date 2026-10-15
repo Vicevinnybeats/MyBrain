@@ -1,9 +1,18 @@
-// MyBrain web app: a static Cloudflare Worker built from this repository.
+// MyBrain web app: a Cloudflare Worker built from this repository.
 // Cloudflare rebuilds it on every push (Workers Builds, build command: sh build.sh).
+// worker.js is copied in by build.sh from the MyBrain repository.
 {
   "name": "mybrain",
+  "main": "worker.js",
   "compatibility_date": "2026-10-01",
   "assets": {
-    "directory": "./dist"
-  }
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "MAPS_REPO": "Vicevinnybeats/mybrain-maps"
+  },
+  // keep variables/secrets you add in the dashboard when this redeploys
+  "keep_vars": true
 }

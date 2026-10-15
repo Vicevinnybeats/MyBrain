@@ -21,11 +21,25 @@
 <section id="home" class="view">
   <header class="home-head">
     <img src="icons/icon.svg" alt="" class="logo">
-    <div>
+    <div class="grow">
       <h1>MyBrain</h1>
       <p class="tag">Your code, as a living map</p>
     </div>
+    <button id="add-btn" class="add-btn" aria-label="Add a project">+</button>
   </header>
+  <div id="add-panel" class="add-panel" hidden>
+    <h2>Add a project</h2>
+    <p class="meta">MyBrain maps a GitHub repository for you (free, no AI). It shows up here in a few minutes.</p>
+    <form id="add-form" autocomplete="off">
+      <input id="add-repo" type="text" inputmode="url" placeholder="Vicevinnybeats/Cardly" autocapitalize="off"
+             autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="GitHub repository">
+      <input id="add-key" type="password" placeholder="MyBrain key" autocomplete="current-password" hidden aria-label="MyBrain key">
+      <div class="actions"><button class="btn" type="submit">Map it</button>
+        <button class="btn ghost" type="button" id="add-cancel">Close</button></div>
+    </form>
+    <p id="add-msg" class="meta"></p>
+    <div id="add-runs"></div>
+  </div>
   <div id="map-list" class="map-list" aria-live="polite"></div>
   <p id="home-empty" class="empty" hidden>
     No maps yet. In Claude Code run <code>/mybrain</code> and then
@@ -63,12 +77,16 @@
   <div id="progress" class="progress" hidden><span></span><em>Growing neurons…</em></div>
 
   <div class="fabs">
+    <button id="anim" class="icon-btn on" aria-label="Animation on/off" title="Firing signals">
+      <svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
+    </button>
     <button id="fit" class="icon-btn" aria-label="Show whole map">
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5"/></svg>
     </button>
   </div>
 
   <div id="tooltip" class="tooltip" hidden></div>
+  <div id="toast" class="toast" hidden><span id="toast-text"></span><button id="toast-cancel" class="btn ghost">Cancel</button></div>
 
   <!-- bottom sheet (phone) / side panel (desktop) -->
   <aside id="sheet" class="sheet" aria-live="polite" hidden>

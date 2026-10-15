@@ -124,3 +124,28 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   #mapview.with-panel .topbar, #mapview.with-panel .fabs { right: 380px; }
   .search-wrap { max-width: 460px; }
 }
+
+/* path picking toast + path hops */
+.toast { position: absolute; left: 50%; bottom: calc(76px + var(--safe-bottom)); transform: translateX(-50%); z-index: 8;
+  display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid #5eead4;
+  border-radius: 999px; padding: 6px 6px 6px 16px; box-shadow: var(--shadow); font-size: 14px; max-width: calc(100% - 24px); }
+.toast .btn { padding: 6px 12px; }
+.hop-rel { display: block; margin: 2px 0 2px 26px; font-size: 12px; color: #5eead4; font-family: ui-monospace, Menlo, monospace; }
+.path-cli { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--panel-2); border-radius: 10px;
+  padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.path-cli b { color: #5eead4; font-weight: 600; }
+
+/* + add project */
+.grow { flex: 1 1 auto; min-width: 0; }
+.add-btn { flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%; border: 0; cursor: pointer;
+  background: linear-gradient(135deg, #8b5cf6, #06b6d4); color: #fff; font-size: 30px; line-height: 1;
+  box-shadow: 0 6px 20px rgba(139,92,246,.45); display: grid; place-items: center; }
+.add-btn:active { transform: scale(.95); }
+.add-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin: -8px 0 18px; }
+.add-panel h2 { margin: 0 0 4px; font-size: 18px; }
+.add-panel input { width: 100%; height: 46px; border-radius: 10px; border: 1px solid var(--border); background: var(--input);
+  color: var(--text); padding: 0 12px; font-size: 16px; margin-top: 8px; }
+.add-panel input:focus { outline: none; border-color: var(--accent); }
+.run { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 7px 0; border-top: 1px solid var(--border); }
+.run .st { color: var(--text-2); white-space: nowrap; }
+.run .st.ok { color: #4ade80; } .run .st.bad { color: #f87171; }
