@@ -10,6 +10,11 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
+  // Secrets live in Cloudflare Secrets Store; only their names are listed here.
+  "secrets_store_secrets": [
+    { "binding": "GITHUB_TOKEN", "store_id": "b3bdd5e6a19c48fbb6934dc0b8392753", "secret_name": "GITHUB_TOKEN" },
+    { "binding": "ADD_KEY", "store_id": "b3bdd5e6a19c48fbb6934dc0b8392753", "secret_name": "ADD_KEY" }
+  ],
   "vars": {
     "MAPS_REPO": "Vicevinnybeats/mybrain-maps"
   },
