@@ -27,10 +27,19 @@ function timingSafeEqual(a, b) {
   return d === 0;
 }
 
-function allowed(request, env, ctx) {
+// A setting can be a plain secret (a string) or a Secrets Store binding.
+async function setting(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v.get === 'function') { try { return (await v.get()) || ''; } catch (e) { return ''; } }
+  return '';
+}
+
+async function allowed(request, env, ctx) {
   if (ctx && ctx.access) return true;                       // signed in through Access
   const key = request.headers.get('x-mybrain-key') || '';
-  return Boolean(env.ADD_KEY && key && timingSafeEqual(key, env.ADD_KEY));
+  const want = await setting(env.ADD_KEY);
+  return Boolean(want && key && timingSafeEqual(key, want));
 }
 
 // "owner/name", "https://github.com/owner/name(.git)" or "github.com/owner/name"
@@ -45,7 +54,7 @@ async function gh(env, path, init = {}) {
   return fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
-      authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      authorization: `Bearer ${await setting(env.GITHUB_TOKEN)}`,
       accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28',
       'user-agent': 'mybrain-app',
@@ -55,10 +64,19 @@ async function gh(env, path, init = {}) {
 }
 
 async function api(request, env, ctx, path) {
-  if (!allowed(request, env, ctx)) {
-    return json({ error: 'locked', needKey: Boolean(env.ADD_KEY) }, 401);
+  // Health check: which settings this deployment can see (names only, never values).
+  if (path === '/api/health') {
+    return json({
+      ok: true,
+      sees: { ADD_KEY: Boolean(await setting(env.ADD_KEY)), GITHUB_TOKEN: Boolean(await setting(env.GITHUB_TOKEN)),
+              MAPS_REPO: env.MAPS_REPO || null, access: Boolean(ctx && ctx.access) },
+      settingNames: Object.keys(env).filter(k => k !== 'ASSETS').sort(),
+    });
   }
-  if (!env.GITHUB_TOKEN || !env.MAPS_REPO) {
+  if (!(await allowed(request, env, ctx))) {
+    return json({ error: 'locked', needKey: Boolean(await setting(env.ADD_KEY)) }, 401);
+  }
+  if (!(await setting(env.GITHUB_TOKEN)) || !env.MAPS_REPO) {
     return json({ error: 'not-set-up', message: 'Add the GITHUB_TOKEN secret to the mybrain Worker first.' }, 503);
   }
   const wf = `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml`;
