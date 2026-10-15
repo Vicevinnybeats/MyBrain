@@ -1,0 +1,45 @@
+# MyBrain: refresh this repository's map on every push (free, no AI).
+# It builds the code map with MyBrain and publishes it to your MyBrain app.
+#
+# Needs one repository secret: MYBRAIN_MAPS_TOKEN
+#   (a GitHub token that can write to your private mybrain-maps repository;
+#    see https://github.com/Vicevinnybeats/MyBrain#part-3-maps-that-update-themselves)
+name: MyBrain map
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: mybrain-map
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install MyBrain
+        run: uv tool install "git+https://github.com/Vicevinnybeats/MyBrain"
+
+      - name: Build the map (code only, free)
+        run: mybrain update .
+
+      - name: Publish to the MyBrain app
+        env:
+          MYBRAIN_MAPS_TOKEN: ${{ secrets.MYBRAIN_MAPS_TOKEN }}
+          MYBRAIN_MAPS_REPO: ${{ vars.MYBRAIN_MAPS_REPO || 'Vicevinnybeats/mybrain-maps' }}
+        run: |
+          if [ -z "$MYBRAIN_MAPS_TOKEN" ]; then
+            echo "::error::Add the MYBRAIN_MAPS_TOKEN secret to this repository (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          mybrain-publish . --name "${{ github.event.repository.name }}"

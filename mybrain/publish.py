@@ -145,8 +145,11 @@ def _maps_checkout(maps_dir: str | None) -> tuple[Path, bool]:
         return Path(explicit).expanduser().resolve(), False
     repo = os.environ.get("MYBRAIN_MAPS_REPO", DEFAULT_MAPS_REPO)
     token = os.environ.get("MYBRAIN_MAPS_TOKEN", "")
-    url = (f"https://x-access-token:{token}@github.com/{repo}.git" if token
-           else f"https://github.com/{repo}.git")
+    if "://" in repo or repo.startswith(("/", ".", "git@")):
+        url = repo                                   # a full URL or a local path
+    else:
+        url = (f"https://x-access-token:{token}@github.com/{repo}.git" if token
+               else f"https://github.com/{repo}.git")
     dest = Path.home() / ".mybrain" / "maps-repo"
     if (dest / ".git").exists():
         _git(["remote", "set-url", "origin", url], dest)

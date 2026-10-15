@@ -73,6 +73,73 @@ the map, list them in a `.mybrainignore` file. It works like `.gitignore`.
 
 ---
 
+## The MyBrain app (phone and desktop)
+
+The app is a website that lists all your maps. Tap one to open it as a living
+network: pinch to zoom, drag with one finger, tap a neuron for its synapses
+and **Explain**, search from the top bar, filter **Lobes**, and read the
+**Brain Scan**. To move a neuron on a phone, touch and hold it, then drag.
+
+- **Phone:** open the app link in Safari or Chrome, then use **Share → Add to
+  Home Screen** (iPhone) or **⋮ → Install app** (Android).
+- **Desktop:** Chrome or Edge show an **Install** icon in the address bar.
+- It works offline for maps you've already opened.
+
+### One-time hosting setup (free, about 10 minutes)
+
+The app runs on Cloudflare (free) and reads your maps from a **private** GitHub
+repository called `mybrain-maps`. Only you can open it: Cloudflare emails you a
+login code.
+
+1. **Create the maps repo.** github.com/new, name `mybrain-maps`, choose
+   **Private**, tick **Add a README file**, then **Create**. Ask Claude in a
+   MyBrain session to "set up mybrain-maps", and it adds the starter files.
+2. **Connect Cloudflare.** dash.cloudflare.com → **Workers & Pages** →
+   **Create application** → **Import a repository** → connect GitHub and pick
+   `mybrain-maps`. Set **Build command** to `sh build.sh` and leave
+   **Deploy command** as `npx wrangler deploy`. Then **Deploy**.
+3. **Lock it to you.** Open the new `mybrain` Worker → **Access** tab →
+   **Protect this Worker behind Access** → **All traffic** → allow your
+   **email address** → **Apply Access**.
+4. Open the link Cloudflare shows (`https://mybrain.<you>.workers.dev`), enter
+   your email, then type the code you receive. Done!
+
+You never paste passwords or tokens into a chat: all of this happens on the
+Cloudflare and GitHub websites.
+
+### Send a map to the app
+
+In Claude Code: `/mybrain publish`. In a terminal: `mybrain-publish .`
+
+---
+
+## Part 3: maps that update themselves
+
+Add the MyBrain workflow to any repository and its map refreshes on every
+push (free, code only).
+
+**Add it:** in a Claude Code session on that repo, type `/mybrain add-ci`.
+Or, from the repo folder on your computer, run this one line:
+
+```bash
+mkdir -p .github/workflows && curl -fsSL https://raw.githubusercontent.com/Vicevinnybeats/MyBrain/HEAD/ci/mybrain.yml -o .github/workflows/mybrain.yml
+```
+
+Then commit and push.
+
+**Give it permission (once per repo):** the workflow needs a token that can
+write to `mybrain-maps`.
+
+1. Make the token once: github.com → **Settings** → **Developer settings** →
+   **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
+   Name it `MyBrain maps`, choose **Only select repositories** → `mybrain-maps`,
+   and under **Permissions** set **Contents** to **Read and write**. Copy the
+   token into your password manager.
+2. In each repo: **Settings** → **Secrets and variables** → **Actions** →
+   **New repository secret**. Name it `MYBRAIN_MAPS_TOKEN` and paste the token.
+
+---
+
 ## Docs, PDFs and images (optional)
 
 Only with Ollama on your own PC. Install it, run `ollama pull qwen2.5-coder:7b`, then:

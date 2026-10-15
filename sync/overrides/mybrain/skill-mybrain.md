@@ -24,6 +24,7 @@ neurons that belong together · **core neurons** = the most connected ones.
 /mybrain path "A" "B"            # shortest chain of synapses from A to B
 /mybrain explain "X"             # plain-language explanation of one neuron
 /mybrain publish                 # send this map to the MyBrain web app (see below)
+/mybrain add-ci                  # make this repo's map update itself on every push
 ```
 
 ## Rules
@@ -49,6 +50,7 @@ mybrain --version
 
 - `query`, `path`, `explain` → go to **Questions** below.
 - `publish` → go to **Publish** below.
+- `add-ci` → go to **Add the workflow** below.
 - A plain question about the code (not a command) and `mybrain-out/graph.json`
   already exists → go straight to **Questions** with `mybrain query "<question>"`.
 - Otherwise → **Build a map**. No path means `.`.
@@ -99,12 +101,34 @@ using only what the command returned; name the files involved.
 
 ### Publish
 
-Sends the map to the user's MyBrain web app (a GitHub repo of maps that the app
-reads). Needs the maps repo set up once, see the MyBrain README.
+Sends the map to the user's MyBrain web app. The app is built from the
+user's private `mybrain-maps` GitHub repository, so publishing = pushing the
+map there. Build the map first if `mybrain-out/graph.json` is missing.
 
 ```bash
-mybrain-publish "$TARGET"   # prints the app link for this map
+mybrain-publish "$TARGET"          # optional: --name <short-name>
 ```
 
-If `mybrain-publish` is missing, tell the user to update MyBrain
-(`uv tool install --force "git+https://github.com/Vicevinnybeats/MyBrain"`).
+- In a cloud session, git can only push to repositories attached to the
+  session. If the push is refused, attach `Vicevinnybeats/mybrain-maps` with
+  push access (the add_repo tool) and run it again.
+- Success prints "pushed - the app updates in about a minute". Tell the user
+  to open their MyBrain app and pull down to refresh.
+- `mybrain-publish` missing → update MyBrain:
+  `uv tool install --force "git+https://github.com/Vicevinnybeats/MyBrain"`.
+
+### Add the workflow
+
+Makes the current repository publish a fresh map on every push to main/master.
+
+```bash
+mkdir -p .github/workflows
+curl -fsSL https://raw.githubusercontent.com/Vicevinnybeats/MyBrain/HEAD/ci/mybrain.yml \
+  -o .github/workflows/mybrain.yml
+```
+
+Commit and push it (on the branch the user works on). Then tell the user the
+one thing they must do themselves, once per repository:
+"In GitHub open this repo → Settings → Secrets and variables → Actions →
+New repository secret. Name: `MYBRAIN_MAPS_TOKEN`, value: your MyBrain maps
+token." Never ask for the token in chat.
