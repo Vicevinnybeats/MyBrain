@@ -267,15 +267,15 @@ function showInfo(nodeId) {{
   if (!isMetaNode) {{
     html += `<div class="field">Type: ${{esc(n.file_type || 'unknown')}}</div>`;
   }}
-  html += `<div class="field">Community: ${{esc(n.community_name || '')}}</div>`;
+  html += `<div class="field">Lobe: ${{esc(n.community_name || '')}}</div>`;
   if (!isMetaNode) {{
     html += `<div class="field">Source: ${{esc(n.source_file || '-')}}</div>`;
   }} else if (n.member_count !== undefined && n.member_count !== null) {{
     html += `<div class="field">Members: ${{esc(n.member_count)}}</div>`;
   }}
-  html += `<div class="field">Degree: ${{n.degree}}</div>`;
+  html += `<div class="field">Synapses: ${{n.degree}}</div>`;
   if (neighborIds.length) {{
-    html += `<div class="field" style="margin-top:8px;color:var(--text-2);font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>`;
+    html += `<div class="field" style="margin-top:8px;color:var(--text-2);font-size:11px">Connected neurons (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>`;
   }}
   document.getElementById('info-content').innerHTML = html;
 }}
@@ -365,7 +365,7 @@ network.on('click', params => {{
   if (params.nodes.length > 0) {{
     showInfo(params.nodes[0]);
   }} else if (hoveredNodeId === null) {{
-    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+    document.getElementById('info-content').innerHTML = '<span class="empty">Tap a neuron to see its synapses</span>';
   }}
 }});
 
@@ -725,14 +725,15 @@ def to_html(
     legend_json = _js_safe(legend_data)
     hyperedges_json = _js_safe(getattr(G, "graph", {}).get("hyperedges", []))
     title = _html.escape(sanitize_label(_html_document_title(output_path)))
-    stats = f"{G.number_of_nodes()} nodes &middot; {G.number_of_edges()} edges &middot; {len(communities)} communities"
+    stats = f"{G.number_of_nodes()} neurons &middot; {G.number_of_edges()} synapses &middot; {len(communities)} lobes"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>mybrain - {title}</title>
-<script>{_bundled_js("vis-network.min.js")}</script>
+<title>MyBrain - {title}</title>
+<script data-vendor="vis-network@9.1.6/standalone/umd/vis-network.min.js"
+        data-integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1">{_bundled_js("vis-network.min.js")}</script>
 {_html_styles()}
 <script id="mybrain-theme-init">
 // Apply the saved theme before first paint (#3894). No saved choice keeps the
@@ -756,15 +757,15 @@ def to_html(
     <button type="button" data-theme-choice="system">System</button>
   </div>
   <div id="search-wrap">
-    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <input id="search" type="text" placeholder="Search neurons..." autocomplete="off">
     <div id="search-results"></div>
   </div>
   <div id="info-panel">
-    <h3>Node Info</h3>
-    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+    <h3>Neuron</h3>
+    <div id="info-content"><span class="empty">Tap a neuron to see its synapses</span></div>
   </div>
   <div id="legend-wrap">
-    <h3>Communities</h3>
+    <h3>Lobes</h3>
     <div id="legend-controls">
       <label><input type="checkbox" id="select-all-cb" checked onchange="toggleAllCommunities(!this.checked)">Select All</label>
     </div>

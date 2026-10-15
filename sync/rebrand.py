@@ -30,7 +30,9 @@ SYNC = REPO / "sync"
 # Upstream paths we take (relative to the Graphify checkout).
 TAKE = ["graphify", "tests", "tools", "pyproject.toml", "ARCHITECTURE.md"]
 # Upstream files we drop (they only test things MyBrain removed).
-DROP = ["tests/test_cloud_cta.py"]
+DROP = [
+    "tests/test_cloud_cta.py",  # tests the hosted-platform nudge MyBrain removed
+]
 # Files that are copied byte-for-byte (license texts).
 VERBATIM = ["LICENSE", "LICENSE-MIT"]
 # Folders inside the repo that this script owns and rebuilds from scratch.
@@ -83,7 +85,9 @@ PATCHES: list[tuple[str, str, str]] = [
         '<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"\n'
         '        integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1"\n'
         '        crossorigin="anonymous"></script>\n',
-        '<script>{_bundled_js("vis-network.min.js")}</script>\n',
+        '<script data-vendor="vis-network@9.1.6/standalone/umd/vis-network.min.js"\n'
+        '        data-integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1">'
+        '{_bundled_js("vis-network.min.js")}</script>\n',
     ),
     (
         "graphify/exporters/html.py",
@@ -95,7 +99,7 @@ PATCHES: list[tuple[str, str, str]] = [
     (
         "graphify/tree_html.py",
         '  <script src="https://d3js.org/d3.v7.min.js"></script>\n',
-        '  <script>{d3_js}</script>\n',
+        '  <script data-vendor="d3@7.9.0">{d3_js}</script>\n',
     ),
     (
         "graphify/tree_html.py",
@@ -111,7 +115,7 @@ PATCHES: list[tuple[str, str, str]] = [
     (
         "graphify/callflow_html.py",
         '<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>\n',
-        '<script>{_bundled_js("mermaid.min.js")}</script>\n',
+        '<script data-vendor="mermaid@11.12.0">{_bundled_js("mermaid.min.js")}</script>\n',
     ),
     (
         "graphify/callflow_html.py",
@@ -140,7 +144,7 @@ PATCHES: list[tuple[str, str, str]] = [
     (
         "pyproject.toml",
         "__REGEX__" + r'\[project\.urls\]\n(?:[^\n]+\n)*\n',
-        '[project.urls]\nRepository = "https://github.com/vicevinnybeats/mybrain"\n\n',
+        '[project.urls]\nRepository = "https://github.com/Vicevinnybeats/MyBrain"\n\n',
     ),
     (
         "pyproject.toml",
@@ -152,11 +156,124 @@ PATCHES: list[tuple[str, str, str]] = [
         'packages = ["graphify", "graphify.extractors", "graphify.exporters"]',
         'packages = ["graphify", "graphify.extractors", "graphify.exporters", "graphify.vendor"]',
     ),
+    # 8. Free by default: never pick a paid AI (or the Claude CLI) on its own.
+    #    Only a local Ollama is auto-detected; anything else needs --backend.
+    (
+        "graphify/llm.py",
+        '    for backend in ("gemini", "kimi", "claude", "openai", "deepseek"):\n'
+        '        if _get_backend_api_key(backend):\n'
+        '            return backend\n',
+        '    # MyBrain: free by default - auto-detect only a local Ollama. Paid\n'
+        '    # backends are used only when picked explicitly with --backend, or when\n'
+        '    # GRAPHIFY_ALLOW_PAID_AUTODETECT=1 restores upstream auto-detection.\n'
+        '    if os.environ.get("GRAPHIFY_ALLOW_PAID_AUTODETECT", _PAID_AUTODETECT_DEFAULT).strip() != "1":\n'
+        '        ollama_url = _resolve_ollama_base_url("")\n'
+        '        if ollama_url:\n'
+        '            _validate_ollama_base_url(ollama_url)\n'
+        '            return "ollama"\n'
+        '        return None\n'
+        '    for backend in ("gemini", "kimi", "claude", "openai", "deepseek"):\n'
+        '        if _get_backend_api_key(backend):\n'
+        '            return backend\n',
+    ),
+    (
+        "graphify/llm.py",
+        '    if not backend and _claude_cli_available():\n',
+        '    if (not backend and os.environ.get("GRAPHIFY_ALLOW_PAID_AUTODETECT", _PAID_AUTODETECT_DEFAULT).strip() == "1"\n'
+        '            and _claude_cli_available()):\n',
+    ),
+    (
+        "graphify/cli.py",
+        '            print("Code graph updated. For doc/paper/image changes run /graphify --update in your AI assistant.")\n'
+        '            if not (\n',
+        '            print("Code map updated (free, no AI). For docs/PDF/images: /graphify --docs (needs local Ollama).")\n'
+        '            if False and not (  # MyBrain: no paid-AI tips\n',
+    ),
+    # 9. Brain words in the report (GRAPH_REPORT.md = the "Brain Scan").
+    ("graphify/report.py", 'f"# Graph Report - {', 'f"# Brain Scan - {'),
+    ("graphify/report.py", '"## Community Hubs (Navigation)"', '"## Lobes (Navigation)"'),
+    ("graphify/report.py", '"## God Nodes (most connected - your core abstractions)"',
+     '"## Core Neurons (most connected - your core abstractions)"'),
+    ("graphify/report.py", '- {node[\'degree\']} edges")', '- {node[\'degree\']} synapses")'),
+    ("graphify/report.py",
+     'f"- {G.number_of_nodes()} nodes · {G.number_of_edges()} edges · {len(communities)} communities"',
+     'f"- {G.number_of_nodes()} neurons · {G.number_of_edges()} synapses · {len(communities)} lobes"'),
+    ("graphify/report.py", 'f"## Communities ({len(communities)} total,', 'f"## Lobes ({len(communities)} total,'),
+    ("graphify/report.py", 'f"### Community {cid} - \\"{label}\\"",', 'f"### Lobe {cid} - \\"{label}\\"",'),
+    ("graphify/report.py", 'f"Nodes ({len(real_nodes)}): {', 'f"Neurons ({len(real_nodes)}): {'),
+    ("graphify/callflow_html.py", 'stripped.startswith("## God Nodes")',
+     'stripped.startswith(("## God Nodes", "## Core Neurons"))'),
+    # 10. Brain words in graph.html.
+    ("graphify/exporters/html.py", '<title>graphify - {title}</title>', '<title>MyBrain - {title}</title>'),
+    ("graphify/exporters/html.py", 'placeholder="Search nodes..."', 'placeholder="Search neurons..."'),
+    ("graphify/exporters/html.py", '<h3>Node Info</h3>', '<h3>Neuron</h3>'),
+    ("graphify/exporters/html.py", 'Click a node to inspect it', 'Tap a neuron to see its synapses'),
+    ("graphify/exporters/html.py", '<h3>Communities</h3>', '<h3>Lobes</h3>'),
+    ("graphify/exporters/html.py", '<div class="field">Community: ${{', '<div class="field">Lobe: ${{'),
+    ("graphify/exporters/html.py", '<div class="field">Degree: ${{', '<div class="field">Synapses: ${{'),
+    ("graphify/exporters/html.py", 'Neighbors (${{neighborIds.length}})', 'Connected neurons (${{neighborIds.length}})'),
+    ("graphify/exporters/html.py",
+     'stats = f"{G.number_of_nodes()} nodes &middot; {G.number_of_edges()} edges &middot; {len(communities)} communities"',
+     'stats = f"{G.number_of_nodes()} neurons &middot; {G.number_of_edges()} synapses &middot; {len(communities)} lobes"'),
+    # 11. Tests: follow MyBrain's words and free-by-default policy.
+    ("tests/conftest.py",
+     '    for key in backend_detection_env_vars():\n        monkeypatch.delenv(key, raising=False)\n',
+     '    for key in backend_detection_env_vars():\n        monkeypatch.delenv(key, raising=False)\n'
+     '    # MyBrain is free by default (only Ollama is auto-detected); upstream\n'
+     '    # tests exercise the paid auto-detection, so opt back in for them.\n'
+     '    # tests/test_mybrain_free_default.py covers the MyBrain default.\n'
+     '    import graphify.llm as _llm\n'
+     '    monkeypatch.setattr(_llm, "_PAID_AUTODETECT_DEFAULT", "1")\n'),
+    ("tests/test_report.py", 'assert "# Graph Report" in report', 'assert "# Brain Scan" in report'),
+    ("tests/test_report.py", 'assert "## God Nodes" in report', 'assert "## Core Neurons" in report'),
+    ("tests/test_report.py", 'assert "## Communities" in report', 'assert "## Lobes (" in report'),
+    ("tests/test_report.py", 'assert "## Community Hubs (Navigation)" in report', 'assert "## Lobes (Navigation)" in report'),
+    ("tests/test_report_gap_thresholds.py", 'r"## Communities \\((\\d+) total', 'r"## Lobes \\((\\d+) total'),
+    ("tests/test_report_gap_thresholds.py", 'r"### Community ', 'r"### Lobe '),
+    ("tests/test_report_gap_thresholds.py", 'assert "Nodes (3):" in text', 'assert "Neurons (3):" in text'),
+    ("tests/test_pipeline.py", 'assert "God Nodes" in report', 'assert "Core Neurons" in report'),
+    ("tests/test_export.py", 'assert title.startswith("graphify - ")\n    label = title[len("graphify - "):]',
+     'assert title.startswith("MyBrain - ")\n    label = title[len("MyBrain - "):]'),
+    ("tests/test_export.py", 'assert "https://unpkg.com/vis-network/standalone" not in content',
+     'assert "https://unpkg.com/" not in content  # MyBrain bundles it inline'),
+    ("tests/test_export.py", "<div class=\"field\">Community: Core</div>", "<div class=\"field\">Lobe: Core</div>"),
+    ("tests/test_export.py", "<div class=\"field\">Community: Core Systems</div>", "<div class=\"field\">Lobe: Core Systems</div>"),
+    ("tests/test_export.py", "<div class=\"field\">Degree: 1</div>", "<div class=\"field\">Synapses: 1</div>"),
+    ("tests/test_callflow_html.py", '    assert "Transformer" not in html\n',
+     '    assert "Transformer" not in __import__("re").sub(r"(?s)<script data-vendor.*?</script>", "", html)\n'),
+    ("tests/test_install_strings.py",
+     "def test_how_it_works_clarifies_code_only_semantic_extraction():\n",
+     "@__import__(\"pytest\").mark.skip(reason=\"MyBrain does not ship the upstream docs/ folder\")\n"
+     "def test_how_it_works_clarifies_code_only_semantic_extraction():\n"),
+    ("tests/test_pipeline.py", '    assert "Communities" in report\n', '    assert "Lobes" in report\n'),
+    ("tests/test_export.py", "    assert 'crossorigin=\"anonymous\"' in content\n",
+     "    # MyBrain inlines the script, so there is no cross-origin request to protect.\n"),
+    ("graphify/llm.py", '    "OLLAMA_BASE_URL", "OLLAMA_HOST",\n',
+     '    "OLLAMA_BASE_URL", "OLLAMA_HOST",\n    "GRAPHIFY_ALLOW_PAID_AUTODETECT",\n'),
+    ("graphify/llm.py", "def detect_backend() -> str | None:\n",
+     "# MyBrain: \"0\" = free by default. Tests flip this to \"1\" to exercise upstream's\n"
+     "# paid auto-detection without touching the environment.\n"
+     "_PAID_AUTODETECT_DEFAULT = \"0\"\n\n\n"
+     "def detect_backend() -> str | None:\n"),
+    # 12. Claude Code gets the MyBrain skill (sync/overrides/mybrain/skill-mybrain.md);
+    #     upstream's skill.md stays in the package untouched.
+    ("graphify/install.py",
+     '    "claude": {\n        "skill_file": "skill.md",\n',
+     '    "claude": {\n        "skill_file": "skill-mybrain.md",\n'),
+    ("pyproject.toml", 'graphify = ["vendor/*.js", "skill.md",', 'graphify = ["vendor/*.js", "skill-mybrain.md", "skill.md",'),
+    ("tests/test_community_labels_skill.py",
+     '    paths = sorted(REPO_ROOT.glob("graphify/skill*.md"))\n',
+     '    paths = sorted(p for p in REPO_ROOT.glob("graphify/skill*.md")\n'
+     '                   if p.name != "skill-graphify.md")  # MyBrain\'s own skill has no Step 5\n'),
+    ("tests/test_install_references.py",
+     "def test_claude_install_ships_lean_core_and_references(tmp_path):\n",
+     "@__import__(\"pytest\").mark.skip(reason=\"MyBrain installs its own short skill for Claude Code\")\n"
+     "def test_claude_install_ships_lean_core_and_references(tmp_path):\n"),
 ]
 
 # Applied to every text file BEFORE the generic rename (order matters).
 PRE_RENAME = [
-    ("Graphify-Labs/graphify", "vicevinnybeats/mybrain"),
+    ("Graphify-Labs/graphify", "Vicevinnybeats/MyBrain"),
     ("graphifyy", "mybrain"),
 ]
 RENAME = [
@@ -254,8 +371,24 @@ def main() -> None:
         shutil.copy2(f, vendor_dst / f.name)
 
     shutil.rmtree(work)
+    check_vendor()
     check_clean()
     print("Rebrand complete.")
+
+
+VENDOR_SHA384 = {
+    # Same hash upstream pins with SRI for the unpkg copy.
+    "vis-network.min.js": "Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1",
+}
+
+
+def check_vendor() -> None:
+    import base64
+    import hashlib
+    for name, want in VENDOR_SHA384.items():
+        got = base64.b64encode(hashlib.sha384((SYNC / "vendor" / name).read_bytes()).digest()).decode()
+        if got != want:
+            sys.exit(f"sync/vendor/{name} does not match its pinned sha384")
 
 
 def check_clean() -> None:

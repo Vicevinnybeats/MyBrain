@@ -52,7 +52,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/vicevinnybeats/mybrain"
+Repository = "https://github.com/Vicevinnybeats/MyBrain"
 
 [project.optional-dependencies]
 # starlette is pulled in transitively by mcp, but mybrain/serve.py imports it
@@ -160,7 +160,7 @@ include-package-data = false
 # under mybrain/always_on/. There is no mybrain/skills/<host>/SKILL.md in the
 # repo, so no SKILL.md glob is needed here.
 # mybrain/pi/ is the native Pi guard package; Pi registers it in place from the installation.
-mybrain = ["vendor/*.js", "skill.md", "skill-codex.md", "skill-opencode.md", "skill-kilo.md", "command-kilo.md", "skill-aider.md", "skill-amp.md", "skill-agents.md", "skill-copilot.md", "skill-claw.md", "skill-windows.md", "skill-droid.md", "skill-trae.md", "skill-kiro.md", "skill-vscode.md", "skill-pi.md", "skill-devin.md", "skills/*/references/*.md", "always_on/*.md", "pi/package.json", "pi/index.ts"]
+mybrain = ["vendor/*.js", "skill-mybrain.md", "skill.md", "skill-codex.md", "skill-opencode.md", "skill-kilo.md", "command-kilo.md", "skill-aider.md", "skill-amp.md", "skill-agents.md", "skill-copilot.md", "skill-claw.md", "skill-windows.md", "skill-droid.md", "skill-trae.md", "skill-kiro.md", "skill-vscode.md", "skill-pi.md", "skill-devin.md", "skills/*/references/*.md", "always_on/*.md", "pi/package.json", "pi/index.ts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

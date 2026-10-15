@@ -74,6 +74,11 @@ def _isolate_backend_env(monkeypatch):
 
     for key in backend_detection_env_vars():
         monkeypatch.delenv(key, raising=False)
+    # MyBrain is free by default (only Ollama is auto-detected); upstream
+    # tests exercise the paid auto-detection, so opt back in for them.
+    # tests/test_mybrain_free_default.py covers the MyBrain default.
+    import mybrain.llm as _llm
+    monkeypatch.setattr(_llm, "_PAID_AUTODETECT_DEFAULT", "1")
 
 
 _ANALYZE_WARNING_FILTERS = (

@@ -81,7 +81,8 @@ def _code_blocks(markdown: str) -> list[str]:
 
 
 def _skill_bodies() -> list[Path]:
-    paths = sorted(REPO_ROOT.glob("mybrain/skill*.md"))
+    paths = sorted(p for p in REPO_ROOT.glob("mybrain/skill*.md")
+                   if p.name != "skill-mybrain.md")  # MyBrain's own skill has no Step 5
     assert paths, "no generated mybrain/skill*.md found"
     return paths
 

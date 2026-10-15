@@ -333,8 +333,8 @@ def test_to_html_title_uses_portable_path_not_host_absolute():
     m = re.search(r"<title>(.*?)</title>", html)
     assert m, "expected a <title> tag"
     title = m.group(1)
-    assert title.startswith("mybrain - ")
-    label = title[len("mybrain - "):]
+    assert title.startswith("MyBrain - ")
+    label = title[len("MyBrain - "):]
     assert "mike" not in label
     assert "Users" not in label
     assert not label.startswith("/")
@@ -388,13 +388,13 @@ def test_to_html_pins_visjs_version_with_sri():
 
     # Versioned URL — unversioned `vis-network/standalone/...` is rejected.
     assert "vis-network@9.1.6/standalone/umd/vis-network.min.js" in content
-    assert "https://unpkg.com/vis-network/standalone" not in content
+    assert "https://unpkg.com/" not in content  # MyBrain bundles it inline
 
     # SRI integrity attribute pinning the known-good hash.
     assert 'integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1"' in content
 
     # crossorigin="anonymous" is required for SRI on cross-origin scripts.
-    assert 'crossorigin="anonymous"' in content
+    # MyBrain inlines the script, so there is no cross-origin request to protect.
 
 def test_to_html_contains_search():
     G = make_graph()
@@ -1426,9 +1426,9 @@ def test_to_html_show_info_runtime_renders_node_fields(tmp_path):
     info_html = _run_node_info_harness(content, "n_sample")
     assert '<div class="field"><b>SampleNode</b></div>' in info_html
     assert '<div class="field">Type: code</div>' in info_html
-    assert '<div class="field">Community: Core</div>' in info_html
+    assert '<div class="field">Lobe: Core</div>' in info_html
     assert '<div class="field">Source: src/sample.py</div>' in info_html
-    assert '<div class="field">Degree: 1</div>' in info_html
+    assert '<div class="field">Synapses: 1</div>' in info_html
     assert "Type: unknown" not in info_html
     assert "Source: -" not in info_html
 
@@ -1459,9 +1459,9 @@ def test_to_html_aggregated_community_nodes_runtime(tmp_path):
 
     info_html = _run_node_info_harness(content, "0")
     assert '<div class="field"><b>Core Systems</b></div>' in info_html
-    assert '<div class="field">Community: Core Systems</div>' in info_html
+    assert '<div class="field">Lobe: Core Systems</div>' in info_html
     assert '<div class="field">Members: 25</div>' in info_html
-    assert '<div class="field">Degree: 1</div>' in info_html
+    assert '<div class="field">Synapses: 1</div>' in info_html
     assert "Type: unknown" not in info_html
     assert "Source: -" not in info_html
 

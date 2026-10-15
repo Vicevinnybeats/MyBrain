@@ -606,7 +606,7 @@ def _register_always_on_block(target: Path, prefix: str, registration: str) -> N
         )
 _PLATFORM_CONFIG: dict[str, dict] = {
     "claude": {
-        "skill_file": "skill.md",
+        "skill_file": "skill-mybrain.md",
         "skill_dst": Path(".claude") / "skills" / "mybrain" / "SKILL.md",
         "claude_md": True,
         "skill_refs": "claude",

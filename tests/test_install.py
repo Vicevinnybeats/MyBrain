@@ -256,7 +256,7 @@ def test_install_claude_md_does_not_skip_on_an_unrelated_mention_of_the_word(tmp
     home.mkdir()
     claude_md = home / ".claude" / "CLAUDE.md"
     claude_md.parent.mkdir(parents=True)
-    claude_md.write_text("See https://github.com/vicevinnybeats/mybrain for details.\n", encoding="utf-8")
+    claude_md.write_text("See https://github.com/Vicevinnybeats/MyBrain for details.\n", encoding="utf-8")
 
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -268,7 +268,7 @@ def test_install_claude_md_does_not_skip_on_an_unrelated_mention_of_the_word(tmp
         f"an unrelated mention of the word must not suppress the real "
         f"registration block; got {content!r}"
     )
-    assert "See https://github.com/vicevinnybeats/mybrain for details." in content, (
+    assert "See https://github.com/Vicevinnybeats/MyBrain for details." in content, (
         "the user's own pre-existing content must survive"
     )
 

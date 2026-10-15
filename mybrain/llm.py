@@ -3326,6 +3326,7 @@ _BACKEND_DETECTION_EXTRA_ENV = (
     "AZURE_OPENAI_ENDPOINT",
     "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
     "OLLAMA_BASE_URL", "OLLAMA_HOST",
+    "MYBRAIN_ALLOW_PAID_AUTODETECT",
 )
 
 
@@ -3344,6 +3345,11 @@ def backend_detection_env_vars() -> tuple[str, ...]:
     return tuple(seen)
 
 
+# MyBrain: "0" = free by default. Tests flip this to "1" to exercise upstream's
+# paid auto-detection without touching the environment.
+_PAID_AUTODETECT_DEFAULT = "0"
+
+
 def detect_backend() -> str | None:
     """Return the name of whichever backend has an API key set, or None.
 
@@ -3355,6 +3361,15 @@ def detect_backend() -> str | None:
     key now keeps you on the paid backend; remove the paid key (or pass
     --backend ollama explicitly) to route to the local model.
     """
+    # MyBrain: free by default - auto-detect only a local Ollama. Paid
+    # backends are used only when picked explicitly with --backend, or when
+    # MYBRAIN_ALLOW_PAID_AUTODETECT=1 restores upstream auto-detection.
+    if os.environ.get("MYBRAIN_ALLOW_PAID_AUTODETECT", _PAID_AUTODETECT_DEFAULT).strip() != "1":
+        ollama_url = _resolve_ollama_base_url("")
+        if ollama_url:
+            _validate_ollama_base_url(ollama_url)
+            return "ollama"
+        return None
     for backend in ("gemini", "kimi", "claude", "openai", "deepseek"):
         if _get_backend_api_key(backend):
             return backend
@@ -3705,7 +3720,8 @@ def generate_community_labels(
             backend = detect_backend()
         except Exception:
             backend = None
-    if not backend and _claude_cli_available():
+    if (not backend and os.environ.get("MYBRAIN_ALLOW_PAID_AUTODETECT", _PAID_AUTODETECT_DEFAULT).strip() == "1"
+            and _claude_cli_available()):
         # `detect_backend` is key-based, and claude-cli is the one backend with no
         # key to find, so it can never be detected there — and widening detection
         # itself would change extraction's contract, which deliberately refuses to

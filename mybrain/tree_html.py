@@ -281,7 +281,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <svg id="tree-svg" width="{svg_width}" height="{svg_height}"></svg>
   </div>
 
-  <script>{d3_js}</script>
+  <script data-vendor="d3@7.9.0">{d3_js}</script>
   <script>
     const initialJsonData = {data_json};
 

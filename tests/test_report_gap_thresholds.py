@@ -80,10 +80,10 @@ def test_shown_counts_only_what_the_render_loop_renders():
     zero-real-node community is never shown (the render loop skips it), so
     it must be counted as thin rather than going uncounted anywhere."""
     text = _report(5)
-    header = re.search(r"## Communities \((\d+) total, (\d+) thin omitted\)", text)
+    header = re.search(r"## Lobes \((\d+) total, (\d+) thin omitted\)", text)
     assert header and header.group(1) == "3" and header.group(2) == "2"
     assert "(1 shown, 2 thin omitted)" in text
-    rendered = len(re.findall(r"### Community ", text))
+    rendered = len(re.findall(r"### Lobe ", text))
     assert rendered <= 1 or rendered == int(re.search(r"\((\d+) shown", text).group(1))
 
 
@@ -97,7 +97,7 @@ def test_shown_plus_thin_equals_total_communities_and_matches_render_count():
         )
         assert summary, text
         shown, thin = int(summary.group(1)), int(summary.group(2))
-        rendered = len(re.findall(r"### Community \d+ - ", text))
+        rendered = len(re.findall(r"### Lobe \d+ - ", text))
         assert shown == rendered, (min_size, shown, rendered)
         assert shown + thin == 3, (min_size, shown, thin)  # 3 communities total
 
@@ -165,7 +165,7 @@ def test_community_listing_excludes_rationale_and_concept_nodes():
         {"total_files": 3, "total_words": 100}, {},
         root="proj", min_community_size=3,
     )
-    assert "Nodes (3):" in text, text
+    assert "Neurons (3):" in text, text
     assert "Names exist largely" not in text
     assert "Some Concept" not in text
 

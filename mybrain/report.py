@@ -126,7 +126,7 @@ def generate(
     inf_avg = round(sum(inf_scores) / len(inf_scores), 2) if inf_scores else None
 
     lines = [
-        f"# Graph Report - {_portable_root_label(root)}  ({today})",
+        f"# Brain Scan - {_portable_root_label(root)}  ({today})",
         "",
         "## Corpus Check",
     ]
@@ -198,7 +198,7 @@ def generate(
     lines += [
         "",
         "## Summary",
-        f"- {G.number_of_nodes()} nodes · {G.number_of_edges()} edges · {len(communities)} communities"
+        f"- {G.number_of_nodes()} neurons · {G.number_of_edges()} synapses · {len(communities)} lobes"
         + (f" ({shown_count} shown, {thin_count_summary} thin omitted)" if thin_count_summary else ""),
         f"- Extraction: {ext_pct}% EXTRACTED · {inf_pct}% INFERRED · {amb_pct}% AMBIGUOUS"
         + (f" · INFERRED: {len(inf_edges)} edges (avg confidence: {inf_avg})" if inf_avg is not None else ""),
@@ -221,7 +221,7 @@ def generate(
     # literal brackets everywhere else (#1712). Emit wikilinks only when the caller
     # signals Obsidian output; otherwise a plain list, which navigates nowhere-to-break.
     if non_empty:
-        lines += ["", "## Community Hubs (Navigation)"]
+        lines += ["", "## Lobes (Navigation)"]
         for cid in non_empty:
             label = community_labels.get(cid, f"Community {cid}")
             if obsidian:
@@ -232,10 +232,10 @@ def generate(
 
     lines += [
         "",
-        "## God Nodes (most connected - your core abstractions)",
+        "## Core Neurons (most connected - your core abstractions)",
     ]
     for i, node in enumerate(god_node_list, 1):
-        lines.append(f"{i}. `{node['label']}` - {node['degree']} edges")
+        lines.append(f"{i}. `{node['label']}` - {node['degree']} synapses")
 
     lines += ["", "## Surprising Connections (you probably didn't know these)"]
     if surprise_list:
@@ -292,7 +292,7 @@ def generate(
             conf_tag = f"{conf} {cscore:.2f}" if cscore is not None else conf
             lines.append(f"- **{h.get('label', h.get('id', ''))}** — {node_labels} [{conf_tag}]")
 
-    lines += ["", f"## Communities ({len(communities)} total, {thin_count_summary} thin omitted)"]
+    lines += ["", f"## Lobes ({len(communities)} total, {thin_count_summary} thin omitted)"]
     for cid, nodes in communities.items():
         label = community_labels.get(cid, f"Community {cid}")
         score = cohesion_scores.get(cid, 0.0)
@@ -307,9 +307,9 @@ def generate(
         suffix = f" (+{len(real_nodes)-8} more)" if len(real_nodes) > 8 else ""
         lines += [
             "",
-            f"### Community {cid} - \"{label}\"",
+            f"### Lobe {cid} - \"{label}\"",
             f"Cohesion: {score:.2f}",
-            f"Nodes ({len(real_nodes)}): {', '.join(display)}{suffix}",
+            f"Neurons ({len(real_nodes)}): {', '.join(display)}{suffix}",
         ]
 
     ambiguous = [(u, v, d) for u, v, d in G.edges(data=True) if d.get("confidence") == "AMBIGUOUS"]

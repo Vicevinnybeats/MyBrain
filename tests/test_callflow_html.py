@@ -151,7 +151,7 @@ def test_export_callflow_html_cli_accepts_positional_graph_path(tmp_path):
     assert "ExternalOnly" in html
     assert "ExternalGod" in html
     assert "ApiClient" not in html
-    assert "Transformer" not in html
+    assert "Transformer" not in __import__("re").sub(r"(?s)<script data-vendor.*?</script>", "", html)
 
 
 def test_derive_sections_groups_by_architecture_keywords():

@@ -2817,8 +2817,8 @@ def dispatch_command(cmd: str) -> None:
         # exiting silently when a hook-driven rebuild happens to be running.
         ok = _rebuild_code(watch_path, force=force, no_cluster=no_cluster, block_on_lock=True)
         if ok:
-            print("Code graph updated. For doc/paper/image changes run /mybrain --update in your AI assistant.")
-            if not (
+            print("Code map updated (free, no AI). For docs/PDF/images: /mybrain --docs (needs local Ollama).")
+            if False and not (  # MyBrain: no paid-AI tips
                 os.environ.get("GEMINI_API_KEY")
                 or os.environ.get("GOOGLE_API_KEY")
                 or os.environ.get("MOONSHOT_API_KEY")

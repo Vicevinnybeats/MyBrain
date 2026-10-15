@@ -1585,7 +1585,7 @@ def _report_highlights(report_text: str, lang: str) -> str:
         stripped = line.strip()
         if stripped.startswith("## "):
             in_summary = stripped == "## Summary"
-            in_gods = stripped.startswith("## God Nodes")
+            in_gods = stripped.startswith(("## God Nodes", "## Core Neurons"))
             continue
         if in_summary and stripped.startswith("- "):
             keep.append(stripped[2:])
@@ -1707,7 +1707,7 @@ def write_callflow_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{escape(doc_title)}</title>
-<script>{_bundled_js("mermaid.min.js")}</script>
+<script data-vendor="mermaid@11.12.0">{_bundled_js("mermaid.min.js")}</script>
 <style>
 {CSS}
 </style>

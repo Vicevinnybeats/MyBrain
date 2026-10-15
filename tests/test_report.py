@@ -22,7 +22,7 @@ def make_inputs():
 def test_report_contains_header():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
     report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project")
-    assert "# Graph Report" in report
+    assert "# Brain Scan" in report
 
 def test_report_contains_corpus_check():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
@@ -55,7 +55,7 @@ def test_report_omits_unclassified_line_when_none():
 def test_report_contains_god_nodes():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
     report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project")
-    assert "## God Nodes" in report
+    assert "## Core Neurons" in report
 
 def test_report_contains_surprising_connections():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
@@ -65,7 +65,7 @@ def test_report_contains_surprising_connections():
 def test_report_contains_communities():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
     report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project")
-    assert "## Communities" in report
+    assert "## Lobes (" in report
 
 def test_report_contains_ambiguous_section():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
@@ -190,7 +190,7 @@ def test_report_hubs_are_plain_text_by_default():
     G, communities, cohesion, labels, gods, surprises, detection, tokens = make_inputs()
     labels = {cid: f"Widget {cid}" for cid in communities}
     report = generate(G, communities, cohesion, labels, gods, surprises, detection, tokens, "./project", min_community_size=1)
-    assert "## Community Hubs (Navigation)" in report
+    assert "## Lobes (Navigation)" in report
     assert "[[_COMMUNITY_" not in report, "must not emit dangling Obsidian wikilinks by default (#1712)"
     assert any(f"- Widget {cid}" in report for cid in communities)
 
