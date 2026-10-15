@@ -549,7 +549,7 @@
     } else if (status === 401) {
       keyBox.hidden = false; keyBox.focus();
       $('#add-msg').textContent = data.needKey ? 'Enter your MyBrain key (only needed once on this device).'
-        : 'The + button is locked: set an ADD_KEY secret or turn on Cloudflare Access (see README).';
+        : 'The app cannot see an ADD_KEY secret yet. In Cloudflare → mybrain → Settings, add it under "Variables and Secrets" (not under Build), then try again.';
     } else if (status === 503) {
       $('#add-msg').textContent = 'Almost there: add the GITHUB_TOKEN secret to the mybrain Worker (see README).';
     } else if (status === 400) {
