@@ -535,7 +535,7 @@
     const { status, data } = await apiCall('api/repos');
     if (status === 401) {
       $('#add-key').hidden = false;
-      box.innerHTML = '<p class="muted">Enter your MyBrain key above, then tap Map it once (only needed once on this device).</p>';
+      box.innerHTML = '<p class="muted">Type your MyBrain key above (only once on this device), then tap a repository.</p>';
       return;
     }
     if (status !== 200) { box.innerHTML = '<p class="muted">Could not load your repositories. You can still type one above.</p>'; return; }
@@ -548,36 +548,44 @@
     const q = $('#add-repo').value.trim().toLowerCase();
     const mapped = new Set((window.__mapsIndex || []).map(m => (m.source || '').toLowerCase()));
     const rows = repoCache.filter(r => !q || r.repo.toLowerCase().includes(q)).slice(0, 60);
-    box.innerHTML = rows.length ? rows.map(r => `<button class="repo-row" type="button" data-repo="${esc(r.repo)}">
-        <span class="nm">${esc(r.repo.split('/').pop())}${r.private ? ' <span class="muted">🔒</span>' : ''}</span>
-        <span class="muted">${mapped.has(r.repo.toLowerCase()) ? 'mapped ✓ · tap to refresh' : 'updated ' + esc(ago(r.pushed))}</span>
-      </button>`).join('') : '<p class="muted">No repository matches.</p>';
+    box.innerHTML = rows.length ? rows.map(r => {
+      const done = mapped.has(r.repo.toLowerCase());
+      return `<button class="repo-row" type="button" role="listitem" data-repo="${esc(r.repo)}">
+        <span class="info"><span class="nm">${esc(r.repo.split('/').pop())}${r.private ? ' <span class="muted">🔒</span>' : ''}</span>
+        <span class="muted">${esc(r.description ? r.description.slice(0, 80) : 'updated ' + ago(r.pushed))}</span></span>
+        <span class="go${done ? ' done' : ''}">${done ? 'Refresh' : 'Map'}</span>
+      </button>`;
+    }).join('') : (q.includes('/') ? '<p class="muted">Press Enter to map ' + esc(q) + '.</p>' : '<p class="muted">No repository matches.</p>');
   }
   $('#repo-list').addEventListener('click', (e) => {
     const el = e.target.closest('.repo-row');
     if (el) mapRepo(el.dataset.repo);
   });
   $('#add-repo').addEventListener('input', renderRepos);
+  $('#add-key').addEventListener('change', () => { if ($('#add-key').value.trim()) { setKey($('#add-key').value.trim()); $('#add-key').hidden = true; loadRepos(); } });
 
   $('#add-btn').onclick = () => {
     const p = $('#add-panel');
     p.hidden = !p.hidden;
-    if (!p.hidden) { $('#add-msg').textContent = ''; refreshRuns(); loadRepos(); }
+    if (!p.hidden) { $('#add-msg').textContent = ''; $('#add-repo').value = ''; refreshRuns(); loadRepos(); }
   };
   $('#add-cancel').onclick = () => { $('#add-panel').hidden = true; };
+  // Tap outside the card, or Escape, closes the popup.
+  $('#add-panel').addEventListener('click', (e) => { if (e.target.id === 'add-panel') $('#add-panel').hidden = true; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#add-panel').hidden = true; });
   $('#add-form').addEventListener('submit', (e) => { e.preventDefault(); mapRepo($('#add-repo').value.trim()); });
 
   async function mapRepo(repo) {
     const keyBox = $('#add-key');
     if (!keyBox.hidden && keyBox.value.trim()) setKey(keyBox.value.trim());
-    if (!repo) { $('#add-msg').textContent = 'Tap a repository below, or type one like Vicevinnybeats/Cardly.'; return; }
+    if (!repo) { $('#add-msg').textContent = 'Tap a repository below.'; return; }
     $('#add-msg').textContent = 'Starting…';
     let res;
     try { res = await apiCall('api/add', { method: 'POST', body: JSON.stringify({ repo }) }); }
     catch (err) { $('#add-msg').textContent = 'You seem to be offline.'; return; }
     const { status, data } = res;
     if (status === 200) {
-      $('#add-msg').innerHTML = `Mapping <b>${esc(data.repo)}</b>… usually 2–5 minutes. It appears in your list by itself.`;
+      $('#add-msg').innerHTML = `✓ Mapping <b>${esc(data.repo.split('/').pop())}</b>… ready in 2–5 minutes. You can close this; it appears in your list by itself.`;
       $('#add-repo').value = '';
       if (!keyBox.hidden) { keyBox.hidden = true; loadRepos(); }
       renderRepos();
@@ -622,7 +630,14 @@
   $('#install-btn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); installEvt = null; $('#install-btn').hidden = true; };
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => reg.update()).catch(() => {});
+    // A new version took over: reload once so the page and the app match.
+    let reloaded = false;
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || !hadController) return;
+      reloaded = true; location.reload();
+    });
   }
   fetch('version.txt', { cache: 'no-cache' }).then(r => (r.ok ? r.text() : '')).then(v => { $('#version').textContent = v.trim(); }).catch(() => {});
 

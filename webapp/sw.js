@@ -27,12 +27,9 @@ self.addEventListener('fetch', (e) => {
     }).catch(() => caches.match(e.request)));
     return;
   }
-  // app shell: cache first, refresh in the background
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => {
-    const net = fetch(e.request).then(r => {
-      if (r.ok && r.type === 'basic') { const copy = r.clone(); caches.open(SHELL_CACHE).then(c => c.put(e.request, copy)); }
-      return r;
-    }).catch(() => hit);
-    return hit || net;
-  }));
+  // app shell: network first (always the newest app when online), cached copy offline
+  e.respondWith(fetch(e.request).then(r => {
+    if (r.ok && r.type === 'basic') { const copy = r.clone(); caches.open(SHELL_CACHE).then(c => c.put(e.request, copy)); }
+    return r;
+  }).catch(() => caches.match(e.request, { ignoreSearch: true })));
 });

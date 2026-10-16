@@ -156,3 +156,28 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   border: 0; border-top: 1px solid var(--border); background: none; padding: 10px 2px; cursor: pointer; min-height: 52px; }
 .repo-row:hover, .repo-row:active { background: var(--panel-2); }
 .repo-row .nm { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+
+/* + popup: pick a repository */
+.modal { position: fixed; inset: 0; z-index: 50; background: rgba(5,5,15,.62); backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; }
+.modal-card { width: 100%; max-width: 560px; max-height: 88vh; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 20px 20px 0 0;
+  padding: 16px 16px calc(12px + var(--safe-bottom)); box-shadow: var(--shadow); animation: up .22s ease; }
+@media (min-width: 700px) { .modal { align-items: center; } .modal-card { border-radius: 18px; max-height: 80vh; } }
+@keyframes up { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.modal-head h2 { margin: 0; font-size: 20px; }
+.modal-head .icon-btn { box-shadow: none; width: 40px; height: 40px; }
+.modal-card .meta { margin: 6px 0 10px; }
+.modal-card input { width: 100%; height: 48px; border-radius: 12px; border: 1px solid var(--border); background: var(--input);
+  color: var(--text); padding: 0 14px; font-size: 16px; margin-bottom: 8px; -webkit-appearance: none; appearance: none; }
+.modal-card input:focus { outline: none; border-color: var(--accent); }
+.add-msg:empty { display: none; }
+.modal-card .repo-list { flex: 1 1 auto; max-height: none; min-height: 120px; overflow-y: auto; }
+.repo-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 4px; }
+.repo-row .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.repo-row .go { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: #fff; border-radius: 999px; padding: 6px 12px;
+  background: linear-gradient(90deg, #8b5cf6, #06b6d4); }
+.repo-row .go.done { background: var(--panel-2); color: var(--text-2); }
+.add-runs:empty { display: none; }
+.add-runs { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; max-height: 22vh; overflow-y: auto; }

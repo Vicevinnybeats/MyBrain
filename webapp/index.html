@@ -27,20 +27,24 @@
     </div>
     <button id="add-btn" class="add-btn" aria-label="Add a project">+</button>
   </header>
-  <div id="add-panel" class="add-panel" hidden>
-    <h2>Add a project</h2>
-    <p class="meta">MyBrain maps a GitHub repository for you (free, no AI). It shows up here in a few minutes, and then updates itself every hour when the repo changes.</p>
-    <form id="add-form" autocomplete="off">
-      <input id="add-repo" type="text" inputmode="url" placeholder="Search your repos, or type owner/name" autocapitalize="off"
-             autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="GitHub repository">
-      <input id="add-key" type="password" placeholder="MyBrain key" autocomplete="current-password" hidden aria-label="MyBrain key">
-      <div class="actions"><button class="btn" type="submit">Map it</button>
-        <button class="btn ghost" type="button" id="add-cancel">Close</button></div>
-    </form>
-    <p id="add-msg" class="meta"></p>
-    <div id="add-runs"></div>
-    <h3 class="repo-head">Your repositories</h3>
-    <div id="repo-list" class="repo-list"></div>
+  <div id="add-panel" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="add-title">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="add-title">Map a repository</h2>
+        <button type="button" id="add-cancel" class="icon-btn" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="meta">Tap a repository. Its map appears in a few minutes and then updates itself every hour.</p>
+      <form id="add-form" autocomplete="off">
+        <input id="add-repo" type="search" inputmode="search" placeholder="Search your repositories" autocapitalize="off"
+               autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Search your repositories">
+        <input id="add-key" type="password" placeholder="MyBrain key (once per device)" autocomplete="current-password" hidden aria-label="MyBrain key">
+      </form>
+      <p id="add-msg" class="meta add-msg"></p>
+      <div id="repo-list" class="repo-list" role="list"></div>
+      <div id="add-runs" class="add-runs"></div>
+    </div>
   </div>
   <div id="map-list" class="map-list" aria-live="polite"></div>
   <p id="home-empty" class="empty" hidden>
