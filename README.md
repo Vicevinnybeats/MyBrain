@@ -146,28 +146,24 @@ In Claude Code: `/mybrain publish`. In a terminal: `mybrain-publish .`
 
 ## Part 3: maps that update themselves
 
-Add the MyBrain workflow to any repository and its map refreshes on every
-push (free, code only).
+**Nothing to set up per repository.** Add a repo once with the **+** button
+and it stays up to date by itself:
 
-**Add it:** in a Claude Code session on that repo, type `/mybrain add-ci`.
-Or, from the repo folder on your computer, run this one line:
+- Every hour, `mybrain-maps` asks GitHub for each remembered repo's latest
+  commit (a quick check, no download).
+- Only a repo with new commits is cloned, re-mapped (free, no AI) and
+  republished. The app shows the new map a minute or two later.
+- To refresh now: https://github.com/Vicevinnybeats/mybrain-maps/actions/workflows/refresh-maps.yml
+  → **Run workflow**.
+- **Private repos** need one read-only token, once, for all of them:
+  `MYBRAIN_READ_TOKEN` (see the + button section). Public repos need nothing.
+- To keep a folder out of a repo's map (for example `third_party/`), add a
+  `.mybrainignore` file to that repo. It works like `.gitignore`.
 
-```bash
-mkdir -p .github/workflows && curl -fsSL https://raw.githubusercontent.com/Vicevinnybeats/MyBrain/HEAD/ci/mybrain.yml -o .github/workflows/mybrain.yml
-```
-
-Then commit and push.
-
-**Give it permission (once per repo):** the workflow needs a token that can
-write to `mybrain-maps`.
-
-1. Make the token once: github.com → **Settings** → **Developer settings** →
-   **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
-   Name it `MyBrain maps`, choose **Only select repositories** → `mybrain-maps`,
-   and under **Permissions** set **Contents** to **Read and write**. Copy the
-   token into your password manager.
-2. In each repo: **Settings** → **Secrets and variables** → **Actions** →
-   **New repository secret**. Name it `MYBRAIN_MAPS_TOKEN` and paste the token.
+**Optional: instant updates on every push.** If an hour is too slow for one
+repo, add [`ci/mybrain.yml`](ci/mybrain.yml) to it as
+`.github/workflows/mybrain.yml`, plus a `MYBRAIN_MAPS_TOKEN` secret (a
+fine-grained token for `mybrain-maps` with **Contents: Read and write**).
 
 ---
 

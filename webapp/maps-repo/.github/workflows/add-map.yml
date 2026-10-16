@@ -59,4 +59,5 @@ jobs:
         run: |
           git config user.name "MyBrain"
           git config user.email "mybrain@users.noreply.github.com"
-          MYBRAIN_MAPS_DIR="$PWD" mybrain-publish project --name "${REPO##*/}"
+          NAME=$(printf '%s' "${REPO##*/}" | tr 'A-Z' 'a-z')
+          MYBRAIN_MAPS_DIR="$PWD" mybrain-publish project --name "$NAME" --source "$REPO"

@@ -8,7 +8,7 @@ that repository and pushing:
     maps/<name>/report.md   the Brain Scan (GRAPH_REPORT.md)
 
 Usage:
-    mybrain-publish [PATH] [--name NAME] [--maps-dir DIR] [--no-push]
+    mybrain-publish [PATH] [--name NAME] [--maps-dir DIR] [--source OWNER/REPO] [--no-push]
 
 PATH defaults to "." and must contain mybrain-out/graph.json.
 
@@ -166,12 +166,16 @@ def _maps_checkout(maps_dir: str | None) -> tuple[Path, bool]:
     return dest, True
 
 
-def publish(target: Path, name: str, maps_dir: str | None, push: bool) -> Path:
+def publish(target: Path, name: str, maps_dir: str | None, push: bool,
+            source: str | None = None) -> Path:
     graph_path = target / "mybrain-out" / "graph.json"
     if not graph_path.exists():
         raise FileNotFoundError(f"{graph_path} not found - build the map first (mybrain update {target})")
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     data = compact_map(graph, name)
+    if source:
+        # "owner/repo": lets the maps repository refresh this map on its own.
+        data["source"] = source
 
     checkout, managed = _maps_checkout(maps_dir)
     out = checkout / "maps" / name
@@ -218,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(a in ("-h", "--help") for a in args):
         print(__doc__)
         return 0
-    name = maps_dir = None
+    name = maps_dir = source = None
     push = True
     rest = []
     i = 0
@@ -228,13 +232,15 @@ def main(argv: list[str] | None = None) -> int:
             name = args[i + 1]; i += 2
         elif a == "--maps-dir" and i + 1 < len(args):
             maps_dir = args[i + 1]; i += 2
+        elif a == "--source" and i + 1 < len(args):
+            source = args[i + 1]; i += 2
         elif a == "--no-push":
             push = False; i += 1
         else:
             rest.append(a); i += 1
     target = Path(rest[0] if rest else ".").resolve()
     try:
-        publish(target, slugify(name) if name else default_name(target), maps_dir, push)
+        publish(target, slugify(name) if name else default_name(target), maps_dir, push, source)
     except Exception as exc:  # plain message for the phone, no traceback
         print(f"[mybrain publish] error: {exc}", file=sys.stderr)
         return 1
