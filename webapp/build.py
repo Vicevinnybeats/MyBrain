@@ -69,6 +69,7 @@ def build(maps_root: Path | None, out: Path) -> dict:
                 "stats": data.get("stats", {}),
                 "published": data.get("published"),
                 "commit": data.get("commit"),
+                "source": data.get("source"),
             })
             shutil.copytree(d, maps_out / d.name)
     index = {"maps": entries}

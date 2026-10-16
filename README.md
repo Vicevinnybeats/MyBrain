@@ -118,25 +118,22 @@ Cloudflare and GitHub websites.
 
 ### The + button (add a project from the app)
 
-The **+** on the home screen maps any GitHub repo for you in 2–5 minutes.
-It needs three one-time settings. All of them are made on the GitHub and
-Cloudflare websites; never paste a token into a chat.
+Tap **+**: the app lists **your GitHub repositories**. Tap one and its map
+appears in 2–5 minutes, then refreshes itself every hour when the repo
+changes. Public and private repos alike, nothing to set up per repo.
 
-1. **Token for the + button.** github.com → Settings → Developer settings →
-   Personal access tokens → **Fine-grained tokens** → Generate new token.
-   Name it `MyBrain app`, then **Only select repositories** → `mybrain-maps`.
-   Under Permissions → Repository permissions, set **Actions** to **Read and
-   write**. Generate it and copy it.
-2. **Give it to the app.** Cloudflare → Workers & Pages → `mybrain` →
-   **Settings** → **Variables and Secrets** → **Add**. Type: **Secret**,
-   name: `GITHUB_TOKEN`, value: the token. Save.
-3. **Protect the + button.** Either turn on **Access** (see step 3 above), or
-   add a second secret named `ADD_KEY` with a passphrase you make up. The
-   app asks for it once per device.
-4. **Optional, for private repos:** make a read-only token (Fine-grained,
-   **All repositories**, **Contents: Read-only**) and add it in GitHub →
-   `mybrain-maps` → Settings → Secrets and variables → Actions → New
-   repository secret named `MYBRAIN_READ_TOKEN`. Public repos work without it.
+How it stays safe with one token: the app's `GITHUB_TOKEN` (in Cloudflare
+Secrets Store) is the only credential. When you tap a repo, the app gives the
+mapping run a signed pass for exactly that commit, valid for 30 minutes, and
+the run downloads the code through the app. `mybrain-maps` holds no token.
+
+One-time settings (already done for this app):
+1. **The app's token:** a fine-grained token at
+   https://github.com/settings/personal-access-tokens with **All repositories**,
+   **Contents: Read-only** and **Actions: Read and write**. It is stored as
+   `GITHUB_TOKEN` in Cloudflare → Secrets Store.
+2. **ADD_KEY** in the same Secrets Store: a passphrase. The app asks for it
+   once per device, so nobody else can use your + button.
 
 ### Send a map to the app
 
@@ -146,24 +143,14 @@ In Claude Code: `/mybrain publish`. In a terminal: `mybrain-publish .`
 
 ## Part 3: maps that update themselves
 
-**Nothing to set up per repository.** Add a repo once with the **+** button
-and it stays up to date by itself:
+**Nothing to set up per repository.** Add a repo once with the **+** button.
+Every hour the app checks each mapped repo's newest commit (a quick question
+to GitHub, no download), and re-maps only the repos that changed. The app
+shows the new map a minute or two later. In the + list, tapping an
+already-mapped repo refreshes it right away.
 
-- Every hour, `mybrain-maps` asks GitHub for each remembered repo's latest
-  commit (a quick check, no download).
-- Only a repo with new commits is cloned, re-mapped (free, no AI) and
-  republished. The app shows the new map a minute or two later.
-- To refresh now: https://github.com/Vicevinnybeats/mybrain-maps/actions/workflows/refresh-maps.yml
-  → **Run workflow**.
-- **Private repos** need one read-only token, once, for all of them:
-  `MYBRAIN_READ_TOKEN` (see the + button section). Public repos need nothing.
-- To keep a folder out of a repo's map (for example `third_party/`), add a
-  `.mybrainignore` file to that repo. It works like `.gitignore`.
-
-**Optional: instant updates on every push.** If an hour is too slow for one
-repo, add [`ci/mybrain.yml`](ci/mybrain.yml) to it as
-`.github/workflows/mybrain.yml`, plus a `MYBRAIN_MAPS_TOKEN` secret (a
-fine-grained token for `mybrain-maps` with **Contents: Read and write**).
+To keep a folder out of a repo's map (for example `third_party/`), add a
+`.mybrainignore` file to that repo. It works like `.gitignore`.
 
 ---
 

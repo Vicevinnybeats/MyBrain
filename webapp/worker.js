@@ -1,18 +1,28 @@
 /* MyBrain web app server (Cloudflare Worker).
  *
- * Serves the static app, plus two small endpoints behind the "+" button:
- *   POST /api/add     {repo: "owner/name"}  -> starts the "Add a map" workflow
- *                                              in your maps repository
- *   GET  /api/status                          -> the latest mapping runs
+ * Serves the static app, plus the "+" button's endpoints:
+ *   GET  /api/repos              your GitHub repositories, for the picker
+ *   POST /api/add {repo}         map a repository (starts "Add a map" in mybrain-maps)
+ *   GET  /api/status             the latest mapping runs
+ *   GET  /api/archive?...        the repository's code, for that mapping run only
+ *                                (a signed, 30-minute pass; see below)
+ *   GET  /api/health             which settings this deployment can see (names only)
+ * and an hourly timer that re-maps every mapped repository that has new commits.
  *
- * Who may use them: anyone who passed Cloudflare Access (when Access is on),
- * or whoever sends the right "MyBrain key" (the ADD_KEY secret). Nobody else.
+ * Only ONE credential exists: the GITHUB_TOKEN secret (fine-grained; all
+ * repositories: Contents read-only; mybrain-maps: Actions read and write).
+ * The mapping robot in mybrain-maps never holds it. When the app starts a run
+ * it passes the run a signature over (repo, commit, time) made with that token;
+ * the run trades it back here for exactly that commit's code, within 30 minutes.
  *
- * Settings (Cloudflare → the mybrain Worker → Settings → Variables and Secrets):
- *   GITHUB_TOKEN (secret)  fine-grained token: only mybrain-maps, Actions read+write
- *   ADD_KEY      (secret)  optional passphrase, needed when Access is off
- *   MAPS_REPO    (text)    owner/repo of the maps repository (set in wrangler.jsonc)
+ * Who may use /api/repos, /api/add, /api/status: anyone who passed Cloudflare
+ * Access (when Access is on), or whoever sends the right MyBrain key (ADD_KEY).
+ *
+ * Settings: GITHUB_TOKEN, ADD_KEY (Secrets Store, see wrangler.jsonc),
+ *           MAPS_REPO (owner/repo of the maps repository, wrangler.jsonc vars).
  */
+const PASS_MINUTES = 30;
+
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
@@ -63,8 +73,40 @@ async function gh(env, path, init = {}) {
   });
 }
 
+// ---- the signed pass ---------------------------------------------------------
+async function hmac(env, message) {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode('mybrain-pass:' + await setting(env.GITHUB_TOKEN)),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const passMessage = (repo, sha, ts) => `${repo}\n${sha}\n${ts}`;
+
+// The newest commit of a repository's default branch.
+async function headCommit(env, repo) {
+  const r = await gh(env, `/repos/${repo}/commits/HEAD`, { headers: { accept: 'application/vnd.github.sha' } });
+  if (!r.ok) return { error: r.status };
+  return { sha: (await r.text()).trim() };
+}
+
+// Start the "Add a map" run for one repository at one commit.
+async function startMapping(env, repo) {
+  const head = await headCommit(env, repo);
+  if (head.error) return { ok: false, status: head.error };
+  const ts = String(Date.now());
+  const sig = await hmac(env, passMessage(repo, head.sha, ts));
+  const r = await gh(env, `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml/dispatches`, {
+    method: 'POST',
+    body: JSON.stringify({ ref: 'main', inputs: { repo, sha: head.sha, ts, sig } }),
+  });
+  if (r.status !== 204) return { ok: false, status: r.status, message: (await r.text()).slice(0, 300) };
+  return { ok: true, sha: head.sha };
+}
+
 async function api(request, env, ctx, path) {
-  // Health check: which settings this deployment can see (names only, never values).
+  const url = new URL(request.url);
+
   if (path === '/api/health') {
     return json({
       ok: true,
@@ -73,31 +115,58 @@ async function api(request, env, ctx, path) {
       settingNames: Object.keys(env).filter(k => k !== 'ASSETS').sort(),
     });
   }
+
+  // The mapping run trades its signed pass for the code. No key: the pass is the key.
+  if (path === '/api/archive' && request.method === 'GET') {
+    const repo = parseRepo(url.searchParams.get('repo'));
+    const sha = url.searchParams.get('sha') || '';
+    const ts = url.searchParams.get('ts') || '';
+    const sig = url.searchParams.get('sig') || '';
+    if (!repo || !/^[0-9a-f]{40}$/.test(sha) || !/^\d{10,16}$/.test(ts)) return json({ error: 'bad-pass' }, 400);
+    const age = Date.now() - Number(ts);
+    if (age < -60000 || age > PASS_MINUTES * 60000) return json({ error: 'expired-pass' }, 403);
+    if (!timingSafeEqual(sig, await hmac(env, passMessage(repo, sha, ts)))) return json({ error: 'bad-pass' }, 403);
+    const r = await gh(env, `/repos/${repo}/tarball/${sha}`);
+    if (!r.ok) return json({ error: 'github', status: r.status }, 502);
+    return new Response(r.body, { headers: { 'content-type': 'application/gzip', 'cache-control': 'no-store' } });
+  }
+
   if (!(await allowed(request, env, ctx))) {
     return json({ error: 'locked', needKey: Boolean(await setting(env.ADD_KEY)) }, 401);
   }
   if (!(await setting(env.GITHUB_TOKEN)) || !env.MAPS_REPO) {
     return json({ error: 'not-set-up', message: 'Add the GITHUB_TOKEN secret to the mybrain Worker first.' }, 503);
   }
-  const wf = `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml`;
+
+  if (path === '/api/repos' && request.method === 'GET') {
+    const all = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await gh(env, `/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`);
+      if (!r.ok) return json({ error: 'github', status: r.status }, 502);
+      const batch = await r.json();
+      for (const x of batch) all.push({ repo: x.full_name, private: x.private, pushed: x.pushed_at, description: x.description || '' });
+      if (batch.length < 100) break;
+    }
+    return json({ repos: all.filter(x => x.repo !== env.MAPS_REPO) });
+  }
 
   if (path === '/api/add' && request.method === 'POST') {
     let body = {};
     try { body = await request.json(); } catch (e) { /* empty body */ }
     const repo = parseRepo(body.repo);
     if (!repo) return json({ error: 'bad-repo', message: 'Use owner/name, e.g. Vicevinnybeats/GNARL' }, 400);
-    const r = await gh(env, `${wf}/dispatches`, {
-      method: 'POST',
-      body: JSON.stringify({ ref: 'main', inputs: { repo } }),
-    });
-    if (r.status !== 204) {
-      return json({ error: 'github', status: r.status, message: (await r.text()).slice(0, 300) }, 502);
+    const res = await startMapping(env, repo);
+    if (!res.ok) {
+      const message = res.status === 404
+        ? `GitHub does not let the app see ${repo}. Allow the app's token "All repositories" (README).`
+        : (res.message || `GitHub said ${res.status}`);
+      return json({ error: 'github', status: res.status, message }, 502);
     }
     return json({ ok: true, repo });
   }
 
   if (path === '/api/status' && request.method === 'GET') {
-    const r = await gh(env, `${wf}/runs?per_page=8`);
+    const r = await gh(env, `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml/runs?per_page=8`);
     if (!r.ok) return json({ error: 'github', status: r.status }, 502);
     const data = await r.json();
     return json({
@@ -110,6 +179,21 @@ async function api(request, env, ctx, path) {
   return json({ error: 'not-found' }, 404);
 }
 
+// Hourly: re-map each mapped repository whose newest commit differs from its map's.
+async function refreshAll(env) {
+  if (!(await setting(env.GITHUB_TOKEN)) || !env.MAPS_REPO) return;
+  const idx = await env.ASSETS.fetch(new Request('https://assets.local/maps/index.json'));
+  if (!idx.ok) return;
+  const { maps = [] } = await idx.json();
+  for (const m of maps) {
+    if (!m.source) continue;
+    const head = await headCommit(env, m.source);
+    if (head.error || head.sha === m.commit) continue;
+    const res = await startMapping(env, m.source);
+    console.log(`refresh ${m.source}: ${res.ok ? 'started' : 'failed ' + res.status}`);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -119,6 +203,9 @@ export default {
     }
     return env.ASSETS.fetch(request);
   },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(refreshAll(env));
+  },
 };
 
-export { parseRepo };
+export { parseRepo, passMessage };

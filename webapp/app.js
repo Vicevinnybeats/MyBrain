@@ -80,6 +80,7 @@
     list.innerHTML = '';
     $('#home-empty').hidden = idx.length > 0;
     idx.sort((a, b) => (b.published || '').localeCompare(a.published || ''));
+    window.__mapsIndex = idx;
     for (const m of idx) {
       const b = document.createElement('button');
       b.className = 'map-card';
@@ -492,7 +493,7 @@
   const KEY = 'mybrain-key';
   const getKey = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
   const setKey = (k) => { try { localStorage.setItem(KEY, k); } catch (e) { /* private mode */ } };
-  let runTimer = 0, knownMaps = 0;
+  let runTimer = 0;
 
   async function apiCall(path, opts = {}) {
     const headers = { 'content-type': 'application/json' };
@@ -513,7 +514,7 @@
     box.innerHTML = data.runs.slice(0, 5).map(r => {
       const st = r.status !== 'completed' ? ['⏳ mapping…', ''] : r.conclusion === 'success' ? ['✓ ready', 'ok'] : ['✗ ' + (r.conclusion || 'failed'), 'bad'];
       const hint = r.status === 'completed' && r.conclusion === 'failure'
-        ? '<div class="muted">Private repo? Add the MYBRAIN_READ_TOKEN secret to mybrain-maps once (README), then tap Map it again.</div>' : '';
+        ? '<div class="muted">Tap the repo in the list to try again. Still failing? Open mybrain-maps → Actions for the reason.</div>' : '';
       return `<div class="run"><span>${esc(r.title.replace(/^Map /, ''))} <span class="muted">${esc(ago2(r.created))}</span>${hint}</span><span class="st ${st[1]}">${st[0]}</span></div>`;
     }).join('');
     const busy = data.runs.some(r => r.status !== 'completed');
@@ -526,18 +527,50 @@
     refreshRuns();
   }
 
+  // The picker: your GitHub repositories, newest first; tap one to map it.
+  let repoCache = null;
+  async function loadRepos() {
+    const box = $('#repo-list');
+    box.innerHTML = '<p class="muted">Loading your repositories…</p>';
+    const { status, data } = await apiCall('api/repos');
+    if (status === 401) {
+      $('#add-key').hidden = false;
+      box.innerHTML = '<p class="muted">Enter your MyBrain key above, then tap Map it once (only needed once on this device).</p>';
+      return;
+    }
+    if (status !== 200) { box.innerHTML = '<p class="muted">Could not load your repositories. You can still type one above.</p>'; return; }
+    repoCache = data.repos || [];
+    renderRepos();
+  }
+  function renderRepos() {
+    const box = $('#repo-list');
+    if (!repoCache) return;
+    const q = $('#add-repo').value.trim().toLowerCase();
+    const mapped = new Set((window.__mapsIndex || []).map(m => (m.source || '').toLowerCase()));
+    const rows = repoCache.filter(r => !q || r.repo.toLowerCase().includes(q)).slice(0, 60);
+    box.innerHTML = rows.length ? rows.map(r => `<button class="repo-row" type="button" data-repo="${esc(r.repo)}">
+        <span class="nm">${esc(r.repo.split('/').pop())}${r.private ? ' <span class="muted">🔒</span>' : ''}</span>
+        <span class="muted">${mapped.has(r.repo.toLowerCase()) ? 'mapped ✓ · tap to refresh' : 'updated ' + esc(ago(r.pushed))}</span>
+      </button>`).join('') : '<p class="muted">No repository matches.</p>';
+  }
+  $('#repo-list').addEventListener('click', (e) => {
+    const el = e.target.closest('.repo-row');
+    if (el) mapRepo(el.dataset.repo);
+  });
+  $('#add-repo').addEventListener('input', renderRepos);
+
   $('#add-btn').onclick = () => {
     const p = $('#add-panel');
     p.hidden = !p.hidden;
-    if (!p.hidden) { $('#add-msg').textContent = ''; $('#add-repo').focus(); refreshRuns(); }
+    if (!p.hidden) { $('#add-msg').textContent = ''; refreshRuns(); loadRepos(); }
   };
   $('#add-cancel').onclick = () => { $('#add-panel').hidden = true; };
-  $('#add-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const repo = $('#add-repo').value.trim();
+  $('#add-form').addEventListener('submit', (e) => { e.preventDefault(); mapRepo($('#add-repo').value.trim()); });
+
+  async function mapRepo(repo) {
     const keyBox = $('#add-key');
     if (!keyBox.hidden && keyBox.value.trim()) setKey(keyBox.value.trim());
-    if (!repo) { $('#add-msg').textContent = 'Type a GitHub repository, like Vicevinnybeats/Cardly.'; return; }
+    if (!repo) { $('#add-msg').textContent = 'Tap a repository below, or type one like Vicevinnybeats/Cardly.'; return; }
     $('#add-msg').textContent = 'Starting…';
     let res;
     try { res = await apiCall('api/add', { method: 'POST', body: JSON.stringify({ repo }) }); }
@@ -546,22 +579,23 @@
     if (status === 200) {
       $('#add-msg').innerHTML = `Mapping <b>${esc(data.repo)}</b>… usually 2–5 minutes. It appears in your list by itself.`;
       $('#add-repo').value = '';
-      keyBox.hidden = true;
+      if (!keyBox.hidden) { keyBox.hidden = true; loadRepos(); }
+      renderRepos();
       watchRuns();
     } else if (status === 401) {
       keyBox.hidden = false; keyBox.focus();
       $('#add-msg').textContent = data.needKey ? 'Enter your MyBrain key (only needed once on this device).'
-        : 'The app cannot see an ADD_KEY secret yet. In Cloudflare → mybrain → Settings, add it under "Variables and Secrets" (not under Build), then try again.';
+        : 'The app cannot see its ADD_KEY secret (see README).';
     } else if (status === 503) {
-      $('#add-msg').textContent = 'Almost there: add the GITHUB_TOKEN secret to the mybrain Worker (see README).';
+      $('#add-msg').textContent = 'Almost there: the app has no GITHUB_TOKEN yet (see README).';
     } else if (status === 400) {
       $('#add-msg').textContent = data.message || 'That does not look like owner/name.';
     } else if (status === 404 || status === 405 || status === 501) {
       $('#add-msg').textContent = 'This app version has no + server yet. It arrives with the next build.';
     } else {
-      $('#add-msg').textContent = `GitHub said no (${data.status || status}). Check the token's permissions.`;
+      $('#add-msg').textContent = data.message || `GitHub said no (${data.status || status}).`;
     }
-  });
+  }
 
   // ----------------------------------------------------------------- misc --
   $('#back').onclick = () => { location.hash = '#/'; };

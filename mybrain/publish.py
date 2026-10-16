@@ -8,7 +8,7 @@ that repository and pushing:
     maps/<name>/report.md   the Brain Scan (GRAPH_REPORT.md)
 
 Usage:
-    mybrain-publish [PATH] [--name NAME] [--maps-dir DIR] [--source OWNER/REPO] [--no-push]
+    mybrain-publish [PATH] [--name NAME] [--maps-dir DIR] [--source OWNER/REPO] [--commit SHA] [--no-push]
 
 PATH defaults to "." and must contain mybrain-out/graph.json.
 
@@ -167,7 +167,7 @@ def _maps_checkout(maps_dir: str | None) -> tuple[Path, bool]:
 
 
 def publish(target: Path, name: str, maps_dir: str | None, push: bool,
-            source: str | None = None) -> Path:
+            source: str | None = None, commit: str | None = None) -> Path:
     graph_path = target / "mybrain-out" / "graph.json"
     if not graph_path.exists():
         raise FileNotFoundError(f"{graph_path} not found - build the map first (mybrain update {target})")
@@ -176,6 +176,8 @@ def publish(target: Path, name: str, maps_dir: str | None, push: bool,
     if source:
         # "owner/repo": lets the maps repository refresh this map on its own.
         data["source"] = source
+    if commit:
+        data["commit"] = commit
 
     checkout, managed = _maps_checkout(maps_dir)
     out = checkout / "maps" / name
@@ -222,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(a in ("-h", "--help") for a in args):
         print(__doc__)
         return 0
-    name = maps_dir = source = None
+    name = maps_dir = source = commit = None
     push = True
     rest = []
     i = 0
@@ -234,13 +236,15 @@ def main(argv: list[str] | None = None) -> int:
             maps_dir = args[i + 1]; i += 2
         elif a == "--source" and i + 1 < len(args):
             source = args[i + 1]; i += 2
+        elif a == "--commit" and i + 1 < len(args):
+            commit = args[i + 1]; i += 2
         elif a == "--no-push":
             push = False; i += 1
         else:
             rest.append(a); i += 1
     target = Path(rest[0] if rest else ".").resolve()
     try:
-        publish(target, slugify(name) if name else default_name(target), maps_dir, push, source)
+        publish(target, slugify(name) if name else default_name(target), maps_dir, push, source, commit)
     except Exception as exc:  # plain message for the phone, no traceback
         print(f"[mybrain publish] error: {exc}", file=sys.stderr)
         return 1
