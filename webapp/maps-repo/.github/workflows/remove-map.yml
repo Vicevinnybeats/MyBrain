@@ -1,0 +1,44 @@
+# Started by the delete button in the MyBrain app. Removes one map from this
+# repository; the app then rebuilds without it. The mapped repository itself
+# is never touched.
+name: Remove a map
+run-name: "Remove ${{ inputs.name }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Map name (the folder under maps/)"
+        required: true
+
+concurrency:
+  group: maps-push
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove the map
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          case "$NAME" in
+            ''|.|..|*[!a-z0-9._-]*) echo "::error::Not a map name: $NAME"; exit 1;;
+          esac
+          if [ ! -d "maps/$NAME" ]; then echo "Already gone: $NAME"; exit 0; fi
+          git config user.name "MyBrain"
+          git config user.email "mybrain@users.noreply.github.com"
+          git rm -rq "maps/$NAME"
+          git commit -qm "Remove the map of $NAME"
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            sleep $((i * 3)); git pull --rebase -q
+          done
+          exit 1

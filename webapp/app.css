@@ -39,6 +39,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .map-card .dots { flex: 0 0 44px; height: 44px; }
 .map-card h2 { margin: 0 0 2px; font-size: 17px; overflow-wrap: anywhere; }
 .map-card p { margin: 0; color: var(--text-2); font-size: 13px; }
+.map-row { position: relative; }
+.map-row .map-card { padding-right: 60px; }
+.del-btn { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); width: 44px; height: 44px;
+  display: grid; place-items: center; border: 0; border-radius: 12px; background: transparent; color: var(--text-2); cursor: pointer; }
+.del-btn:hover, .del-btn:focus-visible { color: #f87171; background: rgba(248, 113, 113, .1); }
+.del-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.map-row.confirm { background: var(--panel); border: 1px solid #f87171; border-radius: 14px; padding: 14px 16px; }
+.del-ask p { margin: 0 0 8px; font-size: 15px; }
+.del-ask .muted { display: block; font-size: 13px; margin-top: 4px; }
+.del-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.btn.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 .empty { color: var(--text-2); background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 18px; }
 .home-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 26px; gap: 12px; }
 .btn { background: linear-gradient(90deg, #8b5cf6, #06b6d4); color: #fff; border: 0; border-radius: 999px;

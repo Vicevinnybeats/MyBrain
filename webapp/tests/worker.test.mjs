@@ -10,6 +10,7 @@ globalThis.fetch = async (url, init = {}) => {
   let m;
   if ((m = url.match(/\/repos\/([^/]+\/[^/]+)\/commits\/HEAD$/))) return new Response(heads[m[1]] || '', { status: heads[m[1]] ? 200 : 404 });
   if (url.includes('/actions/workflows/add-map.yml/dispatches')) return new Response(null, { status: 204 });
+  if (url.includes('/actions/workflows/remove-map.yml/dispatches')) return new Response(null, { status: 204 });
   if ((m = url.match(/\/repos\/([^/]+\/[^/]+)\/tarball\/([0-9a-f]{40})$/))) return new Response('TARBALL:' + m[1] + '@' + m[2]);
   if (url.includes('/user/repos')) return Response.json([{ full_name: 'Vicevinnybeats/Cardly', private: true, pushed_at: '2026-10-16T00:00:00Z' },
                                                           { full_name: 'Vicevinnybeats/mybrain-maps', private: true, pushed_at: '2026-10-16T00:00:00Z' }]);
@@ -49,6 +50,16 @@ assert.equal((await req(q({ ...inputs, sha: SHA_OLD }))).status, 403);
 assert.equal((await req(q({ ...inputs, sig: '0'.repeat(64) }))).status, 403);
 assert.equal((await req(q({ ...inputs, ts: String(Date.now() - 31 * 60000) }))).status, 403);
 assert.equal((await req(q({ ...inputs, sha: 'nothex' }))).status, 400);
+
+// delete: needs the key, a plain map name, and starts "Remove a map" with it
+const rm = (body, key = 'k') => req('/api/remove', { method: 'POST', headers: key ? { 'x-mybrain-key': key } : {}, body: JSON.stringify(body) });
+assert.equal((await rm({ name: 'cardly' }, '')).status, 401);
+for (const bad of ['../x', 'a/b', '', '..', 'Cardly', 'x y']) assert.equal((await rm({ name: bad })).status, 400, bad);
+calls.length = 0;
+assert.equal((await rm({ name: 'cardly' })).status, 200);
+const rmCall = calls.find(c => c.url.includes('/remove-map.yml/dispatches'));
+assert.ok(rmCall.url.includes('/repos/Vicevinnybeats/mybrain-maps/'));
+assert.deepEqual(JSON.parse(rmCall.init.body), { ref: 'main', inputs: { name: 'cardly' } });
 
 // hourly refresh: only Cardly changed (GNARL same commit; 'old' has no source)
 calls.length = 0;

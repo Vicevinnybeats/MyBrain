@@ -78,18 +78,66 @@
       if (r.ok) idx = (await r.json()).maps || [];
     } catch (e) { /* offline and never cached */ }
     list.innerHTML = '';
-    $('#home-empty').hidden = idx.length > 0;
     idx.sort((a, b) => (b.published || '').localeCompare(a.published || ''));
     window.__mapsIndex = idx;
-    for (const m of idx) {
+    // maps being deleted stay hidden until the app has rebuilt without them
+    const gone = loadRemoving();
+    const shown = idx.filter(m => !gone[m.name]);
+    $('#home-empty').hidden = shown.length > 0;
+    for (const m of shown) {
+      const row = document.createElement('div');
+      row.className = 'map-row';
       const b = document.createElement('button');
       b.className = 'map-card';
       b.innerHTML = `${cardDots(m.name)}<div><h2>${esc(m.name)}</h2>
         <p>${fmt(m.stats.neurons)} neurons · ${fmt(m.stats.synapses)} synapses · ${fmt(m.stats.lobes)} lobes</p>
         <p class="muted">updated ${esc(ago(m.published))}</p></div>`;
       b.onclick = () => { location.hash = '#/map/' + encodeURIComponent(m.name); };
-      list.appendChild(b);
+      const del = document.createElement('button');
+      del.className = 'del-btn'; del.type = 'button';
+      del.setAttribute('aria-label', `Delete the map of ${m.name}`);
+      del.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6"/></svg>';
+      del.onclick = () => askDelete(row, m);
+      row.append(b, del);
+      list.appendChild(row);
     }
+  }
+
+  // ------------------------------------------------------------ delete map --
+  const REMOVING_KEY = 'mybrain-removing';
+  function loadRemoving() {
+    let r = {};
+    try { r = JSON.parse(localStorage.getItem(REMOVING_KEY) || '{}') || {}; } catch (e) { r = {}; }
+    const now = Date.now(), live = new Set((window.__mapsIndex || []).map(m => m.name));
+    for (const k of Object.keys(r)) if (!live.has(k) || now - r[k] > 15 * 60000) delete r[k];   // gone, or gave up
+    try { localStorage.setItem(REMOVING_KEY, JSON.stringify(r)); } catch (e) { /* private mode */ }
+    return r;
+  }
+  function askDelete(row, m) {
+    row.classList.add('confirm');
+    row.innerHTML = `<div class="del-ask"><p>Delete the map of <b>${esc(m.name)}</b>?
+      <span class="muted">Your repository is not touched. You can map it again with +.</span></p>
+      <p class="del-msg muted"></p>
+      <div class="del-actions"><button type="button" class="btn ghost keep">Keep</button>
+      <button type="button" class="btn danger yes">Delete</button></div></div>`;
+    row.querySelector('.keep').onclick = () => showHome();
+    row.querySelector('.yes').onclick = async () => {
+      const msg = row.querySelector('.del-msg');
+      msg.textContent = 'Deleting…';
+      let res;
+      try { res = await apiCall('api/remove', { method: 'POST', body: JSON.stringify({ name: m.name }) }); }
+      catch (e) { msg.textContent = 'You seem to be offline.'; return; }
+      if (res.status === 200) {
+        const r = loadRemoving(); r[m.name] = Date.now();
+        try { localStorage.setItem(REMOVING_KEY, JSON.stringify(r)); } catch (e) { /* private mode */ }
+        if (m.source) { jobs = jobs.filter(j => j.repo.toLowerCase() !== m.source.toLowerCase()); saveJobs(); renderJobs(); }
+        showHome();
+      } else if (res.status === 401) {
+        msg.textContent = 'Tap + and enter your MyBrain key first (only once on this device).';
+      } else {
+        msg.textContent = res.data.message || `Could not delete (${res.status}).`;
+      }
+    };
   }
 
   // --------------------------------------------------------------- map view --

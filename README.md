@@ -97,8 +97,8 @@ shortest chain of synapses between them, like `mybrain path`.
 ### One-time hosting setup (free, about 10 minutes)
 
 The app runs on Cloudflare (free) and reads your maps from a **private** GitHub
-repository called `mybrain-maps`. Only you can open it: Cloudflare emails you a
-login code.
+repository called `mybrain-maps`. Viewing needs the app link; adding or
+deleting maps needs your MyBrain key (ADD_KEY, below).
 
 1. **Create the maps repo.** github.com/new, name `mybrain-maps`, choose
    **Private**, tick **Add a README file**, then **Create**. Ask Claude in a
@@ -107,11 +107,7 @@ login code.
    **Create application** → **Import a repository** → connect GitHub and pick
    `mybrain-maps`. Set **Build command** to `sh build.sh` and leave
    **Deploy command** as `npx wrangler deploy`. Then **Deploy**.
-3. **Lock it to you.** Open the new `mybrain` Worker → **Access** tab →
-   **Protect this Worker behind Access** → **All traffic** → allow your
-   **email address** → **Apply Access**.
-4. Open the link Cloudflare shows (`https://mybrain.<you>.workers.dev`), enter
-   your email, then type the code you receive. Done!
+3. Add the two secrets below, then open `https://mybrain.<you>.workers.dev`.
 
 You never paste passwords or tokens into a chat: all of this happens on the
 Cloudflare and GitHub websites.
@@ -134,6 +130,13 @@ One-time settings (already done for this app):
    `GITHUB_TOKEN` in Cloudflare → Secrets Store.
 2. **ADD_KEY** in the same Secrets Store: a passphrase. The app asks for it
    once per device, so nobody else can use your + button.
+
+### Delete a map
+
+Tap the 🗑 on a map's card, then **Delete**. The map disappears right away and
+is removed from `mybrain-maps` within a minute (the "Remove a map" workflow).
+Your repository itself is never touched, and the hourly refresh stops for it.
+Map it again any time with **+**.
 
 ### Send a map to the app
 

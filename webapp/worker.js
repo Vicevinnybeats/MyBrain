@@ -3,6 +3,7 @@
  * Serves the static app, plus the "+" button's endpoints:
  *   GET  /api/repos              your GitHub repositories, for the picker
  *   POST /api/add {repo}         map a repository (starts "Add a map" in mybrain-maps)
+ *   POST /api/remove {name}      delete a map (starts "Remove a map" in mybrain-maps)
  *   GET  /api/status             the latest mapping runs
  *   GET  /api/archive?...        the repository's code, for that mapping run only
  *                                (a signed, 30-minute pass; see below)
@@ -15,7 +16,7 @@
  * it passes the run a signature over (repo, commit, time) made with that token;
  * the run trades it back here for exactly that commit's code, within 30 minutes.
  *
- * Who may use /api/repos, /api/add, /api/status: anyone who passed Cloudflare
+ * Who may use /api/repos, /api/add, /api/remove, /api/status: anyone who passed Cloudflare
  * Access (when Access is on), or whoever sends the right MyBrain key (ADD_KEY).
  *
  * Settings: GITHUB_TOKEN, ADD_KEY (Secrets Store, see wrangler.jsonc),
@@ -163,6 +164,22 @@ async function api(request, env, ctx, path) {
       return json({ error: 'github', status: res.status, message }, 502);
     }
     return json({ ok: true, repo });
+  }
+
+  // Delete a map: runs "Remove a map" in the maps repository (the mapped repo is untouched).
+  if (path === '/api/remove' && request.method === 'POST') {
+    let body = {};
+    try { body = await request.json(); } catch (e) { /* empty body */ }
+    const name = String(body.name || '');
+    if (!/^[a-z0-9._-]{1,100}$/.test(name) || name === '.' || name === '..') return json({ error: 'bad-name' }, 400);
+    const r = await gh(env, `/repos/${env.MAPS_REPO}/actions/workflows/remove-map.yml/dispatches`, {
+      method: 'POST', body: JSON.stringify({ ref: 'main', inputs: { name } }),
+    });
+    if (r.status !== 204) {
+      const message = r.status === 404 ? 'The maps repository has no "Remove a map" workflow yet.' : `GitHub said ${r.status}`;
+      return json({ error: 'github', status: r.status, message }, 502);
+    }
+    return json({ ok: true, name });
   }
 
   if (path === '/api/status' && request.method === 'GET') {
