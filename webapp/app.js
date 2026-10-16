@@ -512,7 +512,9 @@
     if (status !== 200 || !data.runs) { box.innerHTML = ''; return; }
     box.innerHTML = data.runs.slice(0, 5).map(r => {
       const st = r.status !== 'completed' ? ['⏳ mapping…', ''] : r.conclusion === 'success' ? ['✓ ready', 'ok'] : ['✗ ' + (r.conclusion || 'failed'), 'bad'];
-      return `<div class="run"><span>${esc(r.title.replace(/^Map /, ''))} <span class="muted">${esc(ago2(r.created))}</span></span><span class="st ${st[1]}">${st[0]}</span></div>`;
+      const hint = r.status === 'completed' && r.conclusion === 'failure'
+        ? '<div class="muted">Private repo? Add the MYBRAIN_READ_TOKEN secret to mybrain-maps once (README), then tap Map it again.</div>' : '';
+      return `<div class="run"><span>${esc(r.title.replace(/^Map /, ''))} <span class="muted">${esc(ago2(r.created))}</span>${hint}</span><span class="st ${st[1]}">${st[0]}</span></div>`;
     }).join('');
     const busy = data.runs.some(r => r.status !== 'completed');
     if (!busy) { clearInterval(runTimer); runTimer = 0; showHome(); }
