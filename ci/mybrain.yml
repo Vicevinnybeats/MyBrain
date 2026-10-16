@@ -39,7 +39,7 @@ jobs:
           MYBRAIN_MAPS_REPO: ${{ vars.MYBRAIN_MAPS_REPO || 'Vicevinnybeats/mybrain-maps' }}
         run: |
           if [ -z "$MYBRAIN_MAPS_TOKEN" ]; then
-            echo "::error::Add the MYBRAIN_MAPS_TOKEN secret to this repository (Settings > Secrets and variables > Actions)."
-            exit 1
+            echo "::warning::Map built but not published: add the MYBRAIN_MAPS_TOKEN secret to this repository (Settings > Secrets and variables > Actions), then re-run."
+            exit 0
           fi
           mybrain-publish . --name "${{ github.event.repository.name }}"
