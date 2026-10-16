@@ -181,3 +181,27 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .repo-row .go.done { background: var(--panel-2); color: var(--text-2); }
 .add-runs:empty { display: none; }
 .add-runs { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; max-height: 22vh; overflow-y: auto; }
+
+/* mapping status cards (home screen) */
+.jobs { display: grid; gap: 10px; margin-bottom: 14px; }
+.jobs:empty { display: none; }
+.job { display: block; width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--accent);
+  border-radius: 14px; padding: 12px 14px; position: relative; overflow: hidden; }
+.job.ok { border-color: #22c55e; cursor: pointer; }
+.job.bad { border-color: #f87171; }
+.job-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job-name { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; }
+.job-time { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 14px; white-space: nowrap; }
+.job-step { color: var(--text-2); font-size: 13px; margin: 4px 0 8px; }
+.job.bad .job-step a { color: #f87171; }
+.job-bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; position: relative; }
+.job-bar span { display: block; height: 100%; width: 0; border-radius: 3px; transition: width .6s ease;
+  background: linear-gradient(90deg, #8b5cf6, #06b6d4); }
+.job.active .job-bar::after { content: ''; position: absolute; inset: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: shimmer 1.4s linear infinite; }
+.job.ok .job-bar span { background: #22c55e; } .job.bad .job-bar span { background: #f87171; }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--panel-2); border-top-color: #a78bfa;
+  animation: spin 0.8s linear infinite; flex: 0 0 auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin, .job.active .job-bar::after { animation: none; } }

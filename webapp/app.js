@@ -507,25 +507,109 @@
 
   function ago2(iso) { return ago(iso) || ''; }
 
-  async function refreshRuns() {
-    const { status, data } = await apiCall('api/status');
-    const box = $('#add-runs');
-    if (status !== 200 || !data.runs) { box.innerHTML = ''; return; }
-    box.innerHTML = data.runs.slice(0, 5).map(r => {
-      const st = r.status !== 'completed' ? ['⏳ mapping…', ''] : r.conclusion === 'success' ? ['✓ ready', 'ok'] : ['✗ ' + (r.conclusion || 'failed'), 'bad'];
-      const hint = r.status === 'completed' && r.conclusion === 'failure'
-        ? '<div class="muted">Tap the repo in the list to try again. Still failing? Open mybrain-maps → Actions for the reason.</div>' : '';
-      return `<div class="run"><span>${esc(r.title.replace(/^Map /, ''))} <span class="muted">${esc(ago2(r.created))}</span>${hint}</span><span class="st ${st[1]}">${st[0]}</span></div>`;
-    }).join('');
-    const busy = data.runs.some(r => r.status !== 'completed');
-    if (!busy) { clearInterval(runTimer); runTimer = 0; showHome(); }
+  // ---- mapping status cards: live steps, a timer and a progress bar ------
+  const JOBS_KEY = 'mybrain-jobs';
+  let jobs = [];
+  try { jobs = JSON.parse(localStorage.getItem(JOBS_KEY) || '[]'); } catch (e) { jobs = []; }
+  let pollTimer = 0, tickTimer = 0;
+  const saveJobs = () => { try { localStorage.setItem(JOBS_KEY, JSON.stringify(jobs)); } catch (e) { /* private mode */ } };
+  const STEP_LABEL = {
+    'Run actions/checkout@v4': 'Getting ready', 'Run astral-sh/setup-uv@v6': 'Getting ready',
+    'Install MyBrain': 'Getting ready', 'Download the project': 'Downloading the code',
+    'Build the map (code only, free)': 'Building the map', 'Publish': 'Saving the map',
+  };
+  const short = (repo) => repo.split('/').pop();
+  const mmss = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+
+  function jobView(j) {
+    const now = Date.now();
+    const elapsed = (j.doneAt || now) - j.startedAt;
+    let text, pct, cls = 'active';
+    if (j.phase === 'starting') { text = elapsed > 90000 ? 'Taking longer than usual to start…' : 'Starting…'; pct = 5; }
+    else if (j.phase === 'queued') { text = 'Waiting for a free robot…'; pct = 10; }
+    else if (j.phase === 'running') {
+      text = (STEP_LABEL[j.step] || 'Working') + (j.stepCount ? ` · step ${Math.min(j.stepIndex + 1, j.stepCount)} of ${j.stepCount}` : '');
+      pct = 15 + 70 * (j.stepCount ? j.stepIndex / j.stepCount : 0.3);
+    }
+    else if (j.phase === 'publishing') { text = 'Updating the app with the new map…'; pct = 92; }
+    else if (j.phase === 'ready') { text = 'Ready: tap to open'; pct = 100; cls = 'ok'; }
+    else { text = `Failed${j.url ? ` · <a href="${esc(j.url)}" target="_blank" rel="noopener">see why</a>` : ''}`; pct = 100; cls = 'bad'; }
+    const icon = cls === 'active' ? '<span class="spin" aria-hidden="true"></span>' : `<span aria-hidden="true">${cls === 'ok' ? '✅' : '⚠️'}</span>`;
+    return `<div class="job ${cls}" data-repo="${esc(j.repo)}" role="status">
+      <div class="job-top"><span class="job-name">${icon}${esc(short(j.repo))}</span><span class="job-time">⏱ ${mmss(elapsed)}</span></div>
+      <div class="job-step">${cls === 'bad' ? text : esc(text)}</div>
+      <div class="job-bar"><span style="width:${pct.toFixed(0)}%"></span></div></div>`;
+  }
+  function renderJobs() {
+    const box = $('#jobs');
+    if (!box) return;
+    box.innerHTML = jobs.map(jobView).join('');
+  }
+  $('#jobs').addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    const el = e.target.closest('.job.ok');
+    if (!el) return;
+    const j = jobs.find(x => x.repo === el.dataset.repo);
+    if (j) { jobs = jobs.filter(x => x !== j); saveJobs(); location.hash = '#/map/' + encodeURIComponent(j.name || short(j.repo).toLowerCase()); }
+  });
+
+  function addJob(repo) {
+    jobs = jobs.filter(j => j.repo.toLowerCase() !== repo.toLowerCase());
+    jobs.unshift({ repo, startedAt: Date.now(), phase: 'starting' });
+    saveJobs(); renderJobs(); watchJobs();
   }
 
-  function watchRuns() {
-    clearInterval(runTimer);
-    runTimer = setInterval(refreshRuns, 15000);
-    refreshRuns();
+  async function pollJobs() {
+    const now = Date.now();
+    // forget finished cards after a while
+    jobs = jobs.filter(j => !(j.phase === 'ready' && now - j.doneAt > 3 * 60000) && !(j.phase === 'failed' && now - j.doneAt > 20 * 60000));
+    let status;
+    try { status = await apiCall('api/status'); } catch (e) { status = null; }
+    const runs = status && status.status === 200 ? status.data.runs || [] : [];
+    // runs started elsewhere (the hourly refresh) get a card too
+    for (const r of runs) {
+      if (r.status !== 'completed' && !jobs.some(j => j.repo.toLowerCase() === (r.repo || '').toLowerCase())) {
+        jobs.push({ repo: r.repo, startedAt: Date.parse(r.created) || now, phase: 'queued' });
+      }
+    }
+    let index = null;
+    for (const j of jobs) {
+      if (j.phase === 'ready' || j.phase === 'failed') continue;
+      const run = runs.filter(r => (r.repo || '').toLowerCase() === j.repo.toLowerCase() && Date.parse(r.created) >= j.startedAt - 90000)
+        .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))[0];
+      if (!run) continue;
+      j.url = run.url; j.runCreated = run.created;
+      if (run.status === 'completed') {
+        if (run.conclusion !== 'success') { j.phase = 'failed'; j.doneAt = Date.parse(run.updated) || now; continue; }
+        j.phase = 'publishing';
+        if (!index) {
+          try { const r = await fetch('maps/index.json', { cache: 'no-store', credentials: 'same-origin' }); index = r.ok ? (await r.json()).maps || [] : []; }
+          catch (e) { index = []; }
+        }
+        const m = index.find(x => (x.source || '').toLowerCase() === j.repo.toLowerCase());
+        if (m && m.published && Date.parse(m.published) >= Date.parse(run.created) - 60000) {
+          j.phase = 'ready'; j.doneAt = now; j.name = m.name;
+          if (!$('#home').hidden) showHome();
+        }
+      } else {
+        j.phase = run.status === 'in_progress' ? 'running' : 'queued';
+        j.step = run.step; j.stepIndex = run.stepIndex; j.stepCount = run.stepCount;
+      }
+    }
+    saveJobs(); renderJobs();
+    if (!jobs.some(j => j.phase !== 'ready' && j.phase !== 'failed')) stopJobs();
   }
+  function watchJobs() {
+    if (!pollTimer) pollTimer = setInterval(pollJobs, 5000);
+    if (!tickTimer) tickTimer = setInterval(renderJobs, 1000);
+    pollJobs();
+  }
+  function stopJobs() {
+    clearInterval(pollTimer); pollTimer = 0;
+    clearInterval(tickTimer); tickTimer = 0;
+    renderJobs();
+  }
+  if (jobs.length) { renderJobs(); watchJobs(); }
 
   // The picker: your GitHub repositories, newest first; tap one to map it.
   let repoCache = null;
@@ -567,7 +651,7 @@
   $('#add-btn').onclick = () => {
     const p = $('#add-panel');
     p.hidden = !p.hidden;
-    if (!p.hidden) { $('#add-msg').textContent = ''; $('#add-repo').value = ''; refreshRuns(); loadRepos(); }
+    if (!p.hidden) { $('#add-msg').textContent = ''; $('#add-repo').value = ''; loadRepos(); }
   };
   $('#add-cancel').onclick = () => { $('#add-panel').hidden = true; };
   // Tap outside the card, or Escape, closes the popup.
@@ -585,11 +669,10 @@
     catch (err) { $('#add-msg').textContent = 'You seem to be offline.'; return; }
     const { status, data } = res;
     if (status === 200) {
-      $('#add-msg').innerHTML = `✓ Mapping <b>${esc(data.repo.split('/').pop())}</b>… ready in 2–5 minutes. You can close this; it appears in your list by itself.`;
       $('#add-repo').value = '';
-      if (!keyBox.hidden) { keyBox.hidden = true; loadRepos(); }
-      renderRepos();
-      watchRuns();
+      keyBox.hidden = true;
+      $('#add-panel').hidden = true;          // the status card on the home screen takes over
+      addJob(data.repo);
     } else if (status === 401) {
       keyBox.hidden = false; keyBox.focus();
       $('#add-msg').textContent = data.needKey ? 'Enter your MyBrain key (only needed once on this device).'

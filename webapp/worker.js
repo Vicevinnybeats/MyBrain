@@ -169,12 +169,24 @@ async function api(request, env, ctx, path) {
     const r = await gh(env, `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml/runs?per_page=8`);
     if (!r.ok) return json({ error: 'github', status: r.status }, 502);
     const data = await r.json();
-    return json({
-      runs: (data.workflow_runs || []).map(w => ({
-        title: w.display_title, status: w.status, conclusion: w.conclusion,
-        created: w.created_at, updated: w.updated_at,
-      })),
-    });
+    const runs = (data.workflow_runs || []).map(w => ({
+      id: w.id, title: w.display_title, repo: (w.display_title || '').replace(/^Map /, ''),
+      status: w.status, conclusion: w.conclusion, created: w.created_at, updated: w.updated_at,
+      url: w.html_url, step: null, stepIndex: 0, stepCount: 0,
+    }));
+    // For runs still going, which step they are on (one small request each).
+    await Promise.all(runs.filter(x => x.status !== 'completed').slice(0, 4).map(async x => {
+      const j = await gh(env, `/repos/${env.MAPS_REPO}/actions/runs/${x.id}/jobs`);
+      if (!j.ok) return;
+      const job = ((await j.json()).jobs || [])[0];
+      if (!job || !job.steps) return;
+      const steps = job.steps.filter(st => !/^(Set up job|Complete job|Post )/.test(st.name));
+      const cur = steps.find(st => st.status === 'in_progress') || steps.find(st => st.status !== 'completed');
+      x.step = cur ? cur.name : null;
+      x.stepIndex = steps.filter(st => st.status === 'completed').length;
+      x.stepCount = steps.length;
+    }));
+    return json({ runs });
   }
   return json({ error: 'not-found' }, 404);
 }
