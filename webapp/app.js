@@ -511,6 +511,8 @@
   const JOBS_KEY = 'mybrain-jobs';
   let jobs = [];
   try { jobs = JSON.parse(localStorage.getItem(JOBS_KEY) || '[]'); } catch (e) { jobs = []; }
+  const isRepo = (s) => /^[\w.-]+\/[\w.-]+$/.test(s || '');
+  jobs = Array.isArray(jobs) ? jobs.filter(j => j && isRepo(j.repo)) : [];   // drop cards from older versions' mistakes
   let pollTimer = 0, tickTimer = 0;
   const saveJobs = () => { try { localStorage.setItem(JOBS_KEY, JSON.stringify(jobs)); } catch (e) { /* private mode */ } };
   const STEP_LABEL = {
@@ -565,10 +567,11 @@
     jobs = jobs.filter(j => !(j.phase === 'ready' && now - j.doneAt > 3 * 60000) && !(j.phase === 'failed' && now - j.doneAt > 20 * 60000));
     let status;
     try { status = await apiCall('api/status'); } catch (e) { status = null; }
-    const runs = status && status.status === 200 ? status.data.runs || [] : [];
-    // runs started elsewhere (the hourly refresh) get a card too
+    const seen = Boolean(status && status.status === 200);
+    const runs = seen ? status.data.runs || [] : [];
+    // runs started elsewhere (the hourly refresh) get a card too, once GitHub names their repo
     for (const r of runs) {
-      if (r.status !== 'completed' && !jobs.some(j => j.repo.toLowerCase() === (r.repo || '').toLowerCase())) {
+      if (r.status !== 'completed' && isRepo(r.repo) && !jobs.some(j => j.repo.toLowerCase() === r.repo.toLowerCase())) {
         jobs.push({ repo: r.repo, startedAt: Date.parse(r.created) || now, phase: 'queued' });
       }
     }
@@ -577,7 +580,11 @@
       if (j.phase === 'ready' || j.phase === 'failed') continue;
       const run = runs.filter(r => (r.repo || '').toLowerCase() === j.repo.toLowerCase() && Date.parse(r.created) >= j.startedAt - 90000)
         .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))[0];
-      if (!run) continue;
+      if (!run) {
+        // GitHub never showed a run for this card: give up rather than spin forever
+        if (seen && now - j.startedAt > (j.phase === 'starting' ? 5 : 15) * 60000) { j.phase = 'failed'; j.doneAt = now; }
+        continue;
+      }
       j.url = run.url; j.runCreated = run.created;
       if (run.status === 'completed') {
         if (run.conclusion !== 'success') { j.phase = 'failed'; j.doneAt = Date.parse(run.updated) || now; continue; }
@@ -590,7 +597,7 @@
         if (m && m.published && Date.parse(m.published) >= Date.parse(run.created) - 60000) {
           j.phase = 'ready'; j.doneAt = now; j.name = m.name;
           if (!$('#home').hidden) showHome();
-        }
+        } else if (now - (Date.parse(run.updated) || now) > 10 * 60000) { j.phase = 'failed'; j.doneAt = now; }
       } else {
         j.phase = run.status === 'in_progress' ? 'running' : 'queued';
         j.step = run.step; j.stepIndex = run.stepIndex; j.stepCount = run.stepCount;

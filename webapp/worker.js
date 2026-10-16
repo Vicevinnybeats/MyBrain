@@ -170,7 +170,9 @@ async function api(request, env, ctx, path) {
     if (!r.ok) return json({ error: 'github', status: r.status }, 502);
     const data = await r.json();
     const runs = (data.workflow_runs || []).map(w => ({
-      id: w.id, title: w.display_title, repo: (w.display_title || '').replace(/^Map /, ''),
+      // While a run waits in the queue GitHub titles it with the workflow's name
+      // ("Add a map"), not "Map owner/name": such a run has no repo yet.
+      id: w.id, title: w.display_title, repo: /^Map [\w.-]+\/[\w.-]+$/.test(w.display_title || '') ? w.display_title.slice(4) : null,
       status: w.status, conclusion: w.conclusion, created: w.created_at, updated: w.updated_at,
       url: w.html_url, step: null, stepIndex: 0, stepCount: 0,
     }));
