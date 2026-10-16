@@ -7,8 +7,7 @@
 name: MyBrain map
 
 on:
-  push:
-    branches: [main, master]
+  push:            # every push; the job below only runs for the default branch
   workflow_dispatch:
 
 concurrency:
@@ -20,6 +19,7 @@ permissions:
 
 jobs:
   map:
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
