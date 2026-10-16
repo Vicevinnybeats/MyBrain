@@ -176,6 +176,11 @@ free) and asks the map first (`query`, `path`, `explain`). It only reads the
 files the map points to, which saves tokens. You don't have to type anything.
 Type `/mybrain` when you want a summary or a fresh map on demand.
 
+It also installs a small guard (like Graphify's): whenever Claude is about to
+search or read files in a repo that has a map, it is reminded to ask the map
+first and shown what the map already knows about that file or word. In a repo
+without a map the guard stays silent.
+
 ---
 
 ## Docs, PDFs and images (optional)

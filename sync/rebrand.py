@@ -277,6 +277,14 @@ PATCHES: list[tuple[str, str, str]] = [
     ("graphify/install.py",
      '        "When the user types `/graphify`, use the installed graphify skill "\n        "or instructions before doing anything else.\\n"\n    )\n',
      '        "When the user types `/graphify`, use the installed graphify skill "\n        "or instructions before doing anything else.\\n"\n        "Use it automatically (free, local, no AI) to save tokens:\\n"\n        "- Before exploring a codebase to answer how it works, where something lives or what calls what: if `graphify-out/graph.json` is missing in the repo root, run `graphify update .` once (seconds to ~2 min), then ask the map first with `graphify query \\"<question>\\"`, `graphify path \\"A\\" \\"B\\"` or `graphify explain \\"X\\"`; read raw files only where the map points.\\n"\n        "- Skip it for tiny tasks (one known file, a typo, a config value).\\n"\n        "- After larger code changes, run `graphify update .` again.\\n"\n        "- Keep graphify-out/ out of commits: add it to .git/info/exclude.\\n"\n    )\n'),
+    # 15. A global install also guards Grep/Read in every Claude Code session
+    #     (silent unless the repo has a map), like a per-project hook install.
+    ("graphify/install.py",
+     '    if platform == "opencode":\n        _install_opencode_plugin(project_dir if project else Path("."))\n',
+     '    if platform == "claude" and not project:\n'
+     '        _install_claude_hook(Path.home(), project=False)\n'
+     '        print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")\n\n'
+     '    if platform == "opencode":\n        _install_opencode_plugin(project_dir if project else Path("."))\n'),
 ]
 
 # Applied to every text file BEFORE the generic rename (order matters).

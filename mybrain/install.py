@@ -980,6 +980,10 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
             _skill_registration("~/.codebuddy/skills/mybrain/SKILL.md"),
         )
 
+    if platform == "claude" and not project:
+        _install_claude_hook(Path.home(), project=False)
+        print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")
+
     if platform == "opencode":
         _install_opencode_plugin(project_dir if project else Path("."))
 
