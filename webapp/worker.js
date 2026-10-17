@@ -105,6 +105,13 @@ async function startMapping(env, repo) {
   return { ok: true, sha: head.sha };
 }
 
+// What a GitHub refusal means, in words the app can show.
+function githubSays(status) {
+  if (status === 401) return "GitHub refused the app's token: it was deleted, expired or regenerated. Make a new one and put it in Cloudflare's Secrets Store as GITHUB_TOKEN (README).";
+  if (status === 403) return "GitHub refused: the app's token lacks a permission, or GitHub's hourly limit was hit. Check the token's settings (README), or try again in an hour.";
+  return `GitHub said ${status}. Try again in a minute.`;
+}
+
 async function api(request, env, ctx, path) {
   const url = new URL(request.url);
 
@@ -143,7 +150,7 @@ async function api(request, env, ctx, path) {
     const all = [];
     for (let page = 1; page <= 5; page++) {
       const r = await gh(env, `/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`);
-      if (!r.ok) return json({ error: 'github', status: r.status }, 502);
+      if (!r.ok) return json({ error: 'github', status: r.status, message: githubSays(r.status) }, 502);
       const batch = await r.json();
       for (const x of batch) all.push({ repo: x.full_name, private: x.private, pushed: x.pushed_at, description: x.description || '' });
       if (batch.length < 100) break;
@@ -160,7 +167,7 @@ async function api(request, env, ctx, path) {
     if (!res.ok) {
       const message = res.status === 404
         ? `GitHub does not let the app see ${repo}. Allow the app's token "All repositories" (README).`
-        : (res.message || `GitHub said ${res.status}`);
+        : res.status === 401 || res.status === 403 ? githubSays(res.status) : (res.message || `GitHub said ${res.status}`);
       return json({ error: 'github', status: res.status, message }, 502);
     }
     return json({ ok: true, repo });
@@ -176,7 +183,7 @@ async function api(request, env, ctx, path) {
       method: 'POST', body: JSON.stringify({ ref: 'main', inputs: { name } }),
     });
     if (r.status !== 204) {
-      const message = r.status === 404 ? 'The maps repository has no "Remove a map" workflow yet.' : `GitHub said ${r.status}`;
+      const message = r.status === 404 ? 'The maps repository has no "Remove a map" workflow yet.' : githubSays(r.status);
       return json({ error: 'github', status: r.status, message }, 502);
     }
     return json({ ok: true, name });

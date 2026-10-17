@@ -31,6 +31,15 @@ assert.equal((await req('/api/repos')).status, 401);
 const repos = await (await req('/api/repos', { headers: { 'x-mybrain-key': 'k' } })).json();
 assert.deepEqual(repos.repos.map(r => r.repo), ['Vicevinnybeats/Cardly']);
 
+// a dead token is explained, not just a number
+{
+  const ok = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes('/user/repos') ? new Response('Bad credentials', { status: 401 }) : ok(url);
+  const dead = await req('/api/repos', { headers: { 'x-mybrain-key': 'k' } });
+  assert.equal(dead.status, 502); assert.match((await dead.json()).message, /token/);
+  globalThis.fetch = ok;
+}
+
 // add: dispatch carries repo, head sha and a pass
 calls.length = 0;
 const add = await req('/api/add', { method: 'POST', headers: { 'x-mybrain-key': 'k' }, body: JSON.stringify({ repo: 'https://github.com/Vicevinnybeats/Cardly' }) });

@@ -677,7 +677,11 @@
       box.innerHTML = '<p class="muted">Type your MyBrain key above (only once on this device), then tap a repository.</p>';
       return;
     }
-    if (status !== 200) { box.innerHTML = '<p class="muted">Could not load your repositories. You can still type one above.</p>'; return; }
+    if (status !== 200) {
+      const why = data.message || (status === 503 ? 'The app has no GITHUB_TOKEN yet (README).' : `The app answered ${status}.`);
+      box.innerHTML = `<p class="muted">Could not load your repositories. ${esc(why)}</p>`;
+      return;
+    }
     repoCache = data.repos || [];
     renderRepos();
   }
