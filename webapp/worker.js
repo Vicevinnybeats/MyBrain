@@ -39,11 +39,22 @@ function timingSafeEqual(a, b) {
 }
 
 // A setting can be a plain secret (a string) or a Secrets Store binding.
-async function setting(v) {
+// Pasted on a phone, a value often carries a space, a line break or quotes: drop them.
+async function rawSetting(v) {
   if (!v) return '';
   if (typeof v === 'string') return v;
   if (typeof v.get === 'function') { try { return (await v.get()) || ''; } catch (e) { return ''; } }
   return '';
+}
+const clean = (x) => String(x).trim().replace(/^["'`]+|["'`]+$/g, '').replace(/^(Bearer|token)\s+/i, '').trim();
+async function setting(v) { return clean(await rawSetting(v)); }
+
+// The token's shape, never its value: which kind, how long, whether it was pasted with extras.
+async function tokenShape(v) {
+  const raw = await rawSetting(v), t = clean(raw);
+  const kind = (t.match(/^(github_pat_|ghp_|gho_|ghs_|ghu_)/) || [])[1] || 'unknown';
+  const fine = kind === 'github_pat_' ? t.length === 93 : kind === 'ghp_' ? t.length === 40 : null;
+  return { kind, length: t.length, lengthLooksRight: fine, hadExtras: raw !== t, hasInnerSpace: /\s/.test(t) };
 }
 
 async function allowed(request, env, ctx) {
@@ -127,7 +138,7 @@ async function api(request, env, ctx, path) {
       } catch (e) { github = { error: String(e).slice(0, 120) }; }
     }
     return json({
-      github,
+      github, token: await tokenShape(env.GITHUB_TOKEN),
       ok: true,
       sees: { ADD_KEY: Boolean(await setting(env.ADD_KEY)), GITHUB_TOKEN: Boolean(await setting(env.GITHUB_TOKEN)),
               MAPS_REPO: env.MAPS_REPO || null, access: Boolean(ctx && ctx.access) },
