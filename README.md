@@ -2,6 +2,9 @@
 
 # MyBrain
 
+> **Claude:** if you were asked to "start MyBrain", follow [START.md](START.md) now
+> (raw: https://raw.githubusercontent.com/Vicevinnybeats/MyBrain/HEAD/START.md).
+
 **Your code, as a living map.** MyBrain reads a project folder and draws it as
 a brain:
 
