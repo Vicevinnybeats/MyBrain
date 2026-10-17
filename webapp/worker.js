@@ -54,7 +54,10 @@ async function tokenShape(v) {
   const raw = await rawSetting(v), t = clean(raw);
   const kind = (t.match(/^(github_pat_|ghp_|gho_|ghs_|ghu_)/) || [])[1] || 'unknown';
   const fine = kind === 'github_pat_' ? t.length === 93 : kind === 'ghp_' ? t.length === 40 : null;
-  return { kind, length: t.length, lengthLooksRight: fine, hadExtras: raw !== t, hasInnerSpace: /\s/.test(t) };
+  return { kind, length: t.length, lengthLooksRight: fine, hadExtras: raw !== t, hasInnerSpace: /\s/.test(t),
+           // the last 4 characters, to compare with the token you copied; where the value comes from
+           endsWith: t.length > 20 ? t.slice(-4) : null,
+           from: typeof v === 'string' ? 'worker secret' : v && typeof v.get === 'function' ? 'Secrets Store' : 'none' };
 }
 
 async function allowed(request, env, ctx) {
