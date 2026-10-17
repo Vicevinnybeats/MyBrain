@@ -116,7 +116,18 @@ async function api(request, env, ctx, path) {
   const url = new URL(request.url);
 
   if (path === '/api/health') {
+    // Does GitHub accept the token? (status code and expiry date only, never the token)
+    let github = null;
+    if (await setting(env.GITHUB_TOKEN)) {
+      try {
+        const g = await gh(env, '/user/repos?per_page=1');
+        github = { status: g.status, ok: g.ok, expires: g.headers.get('github-authentication-token-expiration'),
+                   rateLeft: g.headers.get('x-ratelimit-remaining') };
+        if (!g.ok) github.says = ((await g.json().catch(() => ({}))).message || '').slice(0, 120);
+      } catch (e) { github = { error: String(e).slice(0, 120) }; }
+    }
     return json({
+      github,
       ok: true,
       sees: { ADD_KEY: Boolean(await setting(env.ADD_KEY)), GITHUB_TOKEN: Boolean(await setting(env.GITHUB_TOKEN)),
               MAPS_REPO: env.MAPS_REPO || null, access: Boolean(ctx && ctx.access) },
