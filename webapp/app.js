@@ -98,9 +98,46 @@
       del.setAttribute('aria-label', `Delete the map of ${m.name}`);
       del.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6"/></svg>';
       del.onclick = () => askDelete(row, m);
-      row.append(b, del);
+      const tools = document.createElement('div');
+      tools.className = 'card-tools';
+      if (m.source) {
+        const ref = document.createElement('button');
+        ref.className = 'ref-btn'; ref.type = 'button';
+        ref.setAttribute('aria-label', `Update the map of ${m.name} now`);
+        ref.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6 M20 4v5h-5"/></svg>';
+        ref.onclick = () => refreshMap(ref, m);
+        tools.append(ref);
+      }
+      tools.append(del);
+      row.append(b, tools);
       list.appendChild(row);
     }
+  }
+
+  // ----------------------------------------------------------- refresh map --
+  // Re-maps the repository now (newest commit); the status card shows progress.
+  async function refreshMap(btn, m) {
+    if (btn.classList.contains('busy')) return;
+    btn.classList.add('busy');
+    let res;
+    try { res = await apiCall('api/add', { method: 'POST', body: JSON.stringify({ repo: m.source }) }); }
+    catch (e) { res = { status: 0, data: { message: 'You seem to be offline.' } }; }
+    btn.classList.remove('busy');
+    if (res.status === 200) { addJob(res.data.repo || m.source); return; }
+    if (res.status === 401) {
+      $('#add-panel').hidden = false; $('#add-key').hidden = false; $('#add-key').focus();
+      $('#add-msg').textContent = 'Enter your MyBrain key (only once on this device), then tap the refresh button again.';
+      return;
+    }
+    toastHome(res.data.message || `Could not update (${res.status}).`);
+  }
+  function toastHome(text) {
+    const box = $('#jobs');
+    const el = document.createElement('div');
+    el.className = 'job bad'; el.setAttribute('role', 'status');
+    el.innerHTML = `<div class="job-step">${esc(text)}</div>`;
+    box.prepend(el);
+    setTimeout(() => el.remove(), 8000);
   }
 
   // ------------------------------------------------------------ delete map --

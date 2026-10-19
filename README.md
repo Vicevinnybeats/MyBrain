@@ -134,6 +134,11 @@ One-time settings (already done for this app):
 2. **ADD_KEY** in the same Secrets Store: a passphrase. The app asks for it
    once per device, so nobody else can use your + button.
 
+### Update a map now
+
+Tap the ↻ on a map's card. The app re-maps that repository's newest commit
+(a status card shows the progress) instead of waiting for the hourly check.
+
 ### Delete a map
 
 Tap the 🗑 on a map's card, then **Delete**. The map disappears right away and
