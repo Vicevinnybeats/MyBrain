@@ -47,6 +47,10 @@
       this.pulses = [];
       this.agents = [];                  // live sessions around the brain (step 3)
       this.small = Math.min(window.innerWidth, window.innerHeight) < 600;
+      // A phone draws far less: no glow pass, pixel ratio 1, fewer lines, and fewer
+      // still while a finger is moving it. Measured on GNARL (14k neurons): the glow
+      // doubled the frame time and the synapse lines were three quarters of the rest.
+      this.phone = this.small || Boolean(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
       this._layout();
 
@@ -89,7 +93,7 @@
       this.bloom.compositeMaterial.uniforms.bloomFactors.value = [1.0, 0.6, 0.18, 0, 0];
       this.composer.addPass(this.bloom);
       this.composer.addPass(new T.OutputPass());
-      this.useBloom = true;
+      this.useBloom = !this.phone;
       try { this.keepBloom = localStorage.getItem('mybrain-bloom') === 'on'; } catch (e) { this.keepBloom = false; }
 
       this._frame = (t) => this._tick(t);
@@ -199,13 +203,13 @@
       g.setAttribute('alpha', new T.BufferAttribute(this.alpha, 1));
       this.nodeGeom = g;
       this.nodeMat = new T.ShaderMaterial({
-        uniforms: { uScale: { value: 300 }, uDensity: { value: Math.min(1, Math.max(0.18, Math.sqrt(1200 / n))) } },
+        uniforms: { uScale: { value: 300 }, uMaxSize: { value: this.phone ? 24 : 64 }, uDensity: { value: Math.min(1, Math.max(0.18, Math.sqrt(1200 / n))) } },
         vertexShader: `
           attribute float size; attribute float alpha; attribute vec3 color;
-          uniform float uScale; uniform float uDensity; varying vec3 vC; varying float vA;
+          uniform float uScale; uniform float uMaxSize; uniform float uDensity; varying vec3 vC; varying float vA;
           void main() {
             vec4 mv = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = clamp(size * uScale / -mv.z, 1.5, 64.0);
+            gl_PointSize = clamp(size * uScale / -mv.z, 1.5, uMaxSize);
             gl_Position = projectionMatrix * mv;
             // alpha 2 = in focus: full strength; otherwise dimmed by how crowded the map is
             vC = color; vA = alpha > 1.5 ? 1.0 : alpha * uDensity;
@@ -237,7 +241,8 @@
       g.setAttribute('color', new T.BufferAttribute(col, 3));
       this.edgeGeom = g;
       // a phone draws the most important synapses only
-      this.edgeCap = this.small ? 45000 : 160000;
+      this.edgeCap = this.phone ? 7000 : 160000;
+      this.moveCap = this.phone ? 2500 : 40000;   // synapses drawn while the brain is moving
       this.edgeOpacity = 0.22 * Math.min(1, Math.max(0.2, Math.sqrt(2500 / Math.max(1, this.E))));
       this.edgeMat = new T.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: this.edgeOpacity,
         depthWrite: false, blending: T.AdditiveBlending });
@@ -266,7 +271,7 @@
         if (busy && (this.shell[this.es[e]] || this.shell[this.et[e]])) continue;
         ids.push(e);
       }
-      if (ids.length > this.edgeCap) {
+      if (ids.length > this.moveCap) {          // most important first, so any prefix is a good subset
         const w = (e) => this.deg[this.es[e]] + this.deg[this.et[e]];
         ids.sort((a, b) => w(b) - w(a));
         ids = ids.slice(0, this.edgeCap);
@@ -285,7 +290,7 @@
       const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
       const shell = [];
       for (let i = 0; i < this.n; i++) if (this.shell[i]) shell.push(i);
-      const step = Math.max(1, Math.floor(shell.length / (this.small ? 6000 : 14000)));
+      const step = Math.max(1, Math.floor(shell.length / (this.phone ? 2500 : 14000)));
       const pts = shell.filter((_, k) => k % step === 0);
       for (const i of pts) {
         const k = key(P[3 * i], P[3 * i + 1], P[3 * i + 2]);
@@ -410,7 +415,7 @@
     resize() {
       const r = this.canvas.getBoundingClientRect();
       this.W = Math.max(1, r.width); this.H = Math.max(1, r.height);
-      const cap = this.n > 20000 ? 1.25 : 1.5;
+      const cap = this.phone ? 1 : this.n > 20000 ? 1.25 : 1.5;
       this.dpr = Math.min(window.devicePixelRatio || 1, cap);
       this.renderer.setPixelRatio(this.dpr);
       this.renderer.setSize(this.W, this.H, false);
@@ -644,7 +649,18 @@
       const live = this.animate || this._fly || this._userMoving || this.beams.length || this.agents.length || this.controls.autoRotate;
       if (this.animate) this._stepPulses(now, dt);
       this._stepBeams(now);
-      if (this._dirty || live) {
+      const moving = Boolean(this._userMoving || this._fly);
+      if (moving !== this._wasMoving) {
+        this._wasMoving = moving;
+        const n = this.edgeGeom.index ? this.edgeGeom.index.count : 0;
+        this.edgeGeom.setDrawRange(0, moving ? Math.min(n, 2 * this.moveCap) : Infinity);
+        this.membrane.geometry.setDrawRange(0, moving && this.phone ? 2 * Math.floor(this.membrane.geometry.index.count / 6) : Infinity);
+        if (!moving) this._dirty = true;
+      }
+      // a phone turning on its own needs no more than 30 frames a second
+      const throttle = this.phone && !moving && !this._dirty && now - (this._lastDraw || 0) < 32;
+      if ((this._dirty || live) && !throttle) {
+        this._lastDraw = now;
         this._dirty = false;
         const t0 = performance.now();
         if (this.useBloom) this.composer.render(); else this.renderer.render(this.scene, this.camera);
@@ -665,7 +681,7 @@
     }
 
     _stepPulses(now, dt) {
-      const want = this.path ? 8 : this.selected >= 0 ? 24 : (this.small ? 40 : MAX_PULSES - 10);
+      const want = this.path ? 8 : this.selected >= 0 ? (this.phone ? 12 : 24) : (this.phone ? 20 : MAX_PULSES - 10);
       let budget = 4;
       while (this.pulses.length < want && budget-- > 0) {
         let e = -1, from = -1;
