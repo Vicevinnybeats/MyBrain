@@ -65,18 +65,94 @@
     return svg + '</svg>';
   }
 
+  // ---- Brain Monitor: the home screen refreshes itself while it is open
+  let homeTimer = 0, lastIndexJson = '', lastHealth = null, lastRuns = [];
   async function showHome() {
     closeMap();
     $('#mapview').hidden = true;
     $('#home').hidden = false;
     document.title = 'MyBrain';
-    const list = $('#map-list');
-    list.innerHTML = '<p class="muted">Loading maps…</p>';
-    let idx = [];
+    if (!lastIndexJson) $('#map-list').innerHTML = '<p class="muted">Loading maps…</p>';
+    await refreshHome(true);
+    clearInterval(homeTimer);
+    homeTimer = setInterval(() => { if (!$('#home').hidden && !document.hidden) refreshHome(false); }, 20000);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('#home').hidden) refreshHome(false); });
+
+  async function refreshHome(force) {
+    let idx = null, ok = true;
     try {
       const r = await fetch('maps/index.json', { cache: 'no-cache', credentials: 'same-origin' });
-      if (r.ok) idx = (await r.json()).maps || [];
-    } catch (e) { /* offline and never cached */ }
+      if (r.ok) { const t = await r.text(); if (force || t !== lastIndexJson) { lastIndexJson = t; idx = JSON.parse(t).maps || []; } }
+      else ok = false;
+    } catch (e) { ok = false; }
+    if (idx) renderMaps(idx);
+    else if (force) renderMaps(window.__mapsIndex || []);
+    $('#live').classList.toggle('off', !ok);
+    $('#live-text').textContent = ok ? 'live' : 'offline';
+    // alerts and runs: the token's health (public) and recent mapping runs (needs the key)
+    try { const h = await fetch('api/health', { cache: 'no-store' }); lastHealth = h.ok ? await h.json() : null; } catch (e) { lastHealth = null; }
+    if (getKey()) {
+      try { const st = await apiCall('api/status'); if (st.status === 200) lastRuns = st.data.runs || []; } catch (e) { /* offline */ }
+      if (lastRuns.some(r => r.status !== 'completed' && /^[\w.-]+\/[\w.-]+$/.test(r.repo || '')) && !pollTimer) watchJobs();
+    }
+    renderAlerts();
+    renderVitals();
+    renderActivity();
+  }
+
+  function renderVitals() {
+    const idx = (window.__mapsIndex || []).filter(m => !loadRemoving()[m.name]);
+    const sum = (f) => idx.reduce((a, m) => a + (f(m) || 0), 0);
+    const neurons = sum(m => m.stats.neurons), syn = sum(m => m.stats.synapses), lobes = sum(m => m.stats.lobes);
+    const unlinked = sum(m => m.unlinked), files = sum(m => m.files);
+    const newest = idx.reduce((a, m) => (m.published && (!a || m.published > a) ? m.published : a), null);
+    const biggest = idx.reduce((a, m) => (!a || m.stats.neurons > a.stats.neurons ? m : a), null);
+    const linkedPct = neurons ? 100 * (1 - unlinked / neurons) : 0;
+    const tile = (k, v, pct, sub) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>
+      <div class="bar"><span style="width:${Math.max(2, Math.min(100, pct)).toFixed(0)}%"></span></div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+    $('#vitals').innerHTML = [
+      tile('Maps', fmt(idx.length), 100, newest ? `newest ${esc(ago(newest))}` : ''),
+      tile('Neurons', fmt(neurons), 100, biggest ? `most in ${esc(biggest.name)}` : ''),
+      tile('Synapses', fmt(syn), neurons ? 100 * syn / (2 * neurons) : 0, neurons ? `${(syn / Math.max(1, neurons)).toFixed(1)} per neuron` : ''),
+      tile('Lobes', fmt(lobes), 100, lobes ? `${Math.round(neurons / Math.max(1, lobes))} neurons each` : ''),
+      tile('Linked', `${linkedPct.toFixed(0)}%`, linkedPct, `${fmt(unlinked)} stand alone`),
+      tile('Files', fmt(files), 100, idx.length ? `${Math.round(files / idx.length)} per map` : ''),
+    ].join('');
+  }
+
+  function renderAlerts() {
+    const out = [];
+    const g = lastHealth && lastHealth.github;
+    if (lastHealth && lastHealth.sees && !lastHealth.sees.GITHUB_TOKEN) {
+      out.push(['', 'The app has no GitHub token', 'Add GITHUB_TOKEN in Cloudflare → Secrets Store (README).']);
+    } else if (g && !g.ok) {
+      out.push(['', `GitHub refuses the app's token (${g.status})`, '+, refresh and delete stop working. Make a new token and paste it into Cloudflare → Secrets Store → GITHUB_TOKEN.']);
+    } else if (g && g.expires) {
+      const days = Math.floor((Date.parse(g.expires.replace(' UTC', 'Z').replace(' ', 'T')) - Date.now()) / 86400000);
+      if (days < 30) out.push(['warn', `The app's token expires in ${days} day${days === 1 ? '' : 's'}`, 'Regenerate it on GitHub and paste it into Cloudflare → Secrets Store → GITHUB_TOKEN.']);
+    }
+    const day = Date.now() - 86400000;
+    for (const r of lastRuns) {
+      if (r.status === 'completed' && r.conclusion && r.conclusion !== 'success' && r.conclusion !== 'cancelled' && Date.parse(r.updated) > day) {
+        out.push(['', `Mapping ${esc(short(r.repo || r.title || ''))} failed`, `<a href="${esc(r.url)}" target="_blank" rel="noopener">See why on GitHub</a>`, r.updated]);
+      }
+    }
+    if (!getKey()) out.push(['warn', 'Mapping status is hidden on this device', 'Tap + and enter your MyBrain key once to see runs and failures here.']);
+    $('#alert-count').textContent = out.filter(a => a[0] !== 'warn' || a[1].includes('expires')).length || '';
+    $('#alerts').innerHTML = out.length ? out.map(([cls, title, body, when]) =>
+      `<div class="alert ${cls}"><div><b>${title}</b>${body}</div>${when ? `<time>${esc(ago(when))}</time>` : ''}</div>`).join('')
+      : '<div class="alert ok"><div><b>All clear</b>The token works and no mapping failed in the last day.</div></div>';
+  }
+
+  function renderActivity() {
+    const active = jobs.filter(j => j.phase !== 'ready' && j.phase !== 'failed').length;
+    $('#now-count').textContent = active ? `${active} running` : '';
+    $('#now-empty').hidden = jobs.length > 0;
+  }
+
+  function renderMaps(idx) {
+    const list = $('#map-list');
     list.innerHTML = '';
     idx.sort((a, b) => (b.published || '').localeCompare(a.published || ''));
     window.__mapsIndex = idx;
@@ -84,14 +160,17 @@
     const gone = loadRemoving();
     const shown = idx.filter(m => !gone[m.name]);
     $('#home-empty').hidden = shown.length > 0;
+    $('#map-count').textContent = shown.length || '';
     for (const m of shown) {
       const row = document.createElement('div');
       row.className = 'map-row';
       const b = document.createElement('button');
       b.className = 'map-card';
-      b.innerHTML = `${cardDots(m.name)}<div><h2>${esc(m.name)}</h2>
+      const cores = (m.cores || []).slice(0, 3).map(c => `<b>${esc(c)}</b>`).join(' · ');
+      b.innerHTML = `${cardDots(m.name)}<div style="min-width:0"><h2>${esc(m.name)}</h2>
         <p>${fmt(m.stats.neurons)} neurons · ${fmt(m.stats.synapses)} synapses · ${fmt(m.stats.lobes)} lobes</p>
-        <p class="muted">updated ${esc(ago(m.published))}</p></div>`;
+        ${cores ? `<div class="cores">Core: ${cores}</div>` : ''}
+        <p class="src">updated ${esc(ago(m.published))}${m.commit ? ` · ${esc(m.commit.slice(0, 7))}` : ''}</p></div>`;
       b.onclick = () => { location.hash = '#/map/' + encodeURIComponent(m.name); };
       const del = document.createElement('button');
       del.className = 'del-btn'; del.type = 'button';
@@ -679,6 +758,7 @@
     const box = $('#jobs');
     if (!box) return;
     box.innerHTML = jobs.map(jobView).join('');
+    renderActivity();
   }
   $('#jobs').addEventListener('click', (e) => {
     if (e.target.closest('a')) return;

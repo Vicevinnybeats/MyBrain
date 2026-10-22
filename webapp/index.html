@@ -23,7 +23,7 @@
     <img src="icons/icon.svg" alt="" class="logo">
     <div class="grow">
       <h1>MyBrain</h1>
-      <p class="tag">Your code, as a living map</p>
+      <p class="tag">Brain Monitor <span id="live" class="live" title="Refreshes by itself"><i></i><span id="live-text">live</span></span></p>
     </div>
     <button id="add-btn" class="add-btn" aria-label="Add a project">+</button>
   </header>
@@ -45,12 +45,28 @@
       <div id="repo-list" class="repo-list" role="list"></div>
     </div>
   </div>
-  <div id="jobs" class="jobs" aria-live="polite"></div>
-  <div id="map-list" class="map-list" aria-live="polite"></div>
-  <p id="home-empty" class="empty" hidden>
-    No maps yet. In Claude Code run <code>/mybrain</code> and then
-    <code>/mybrain publish</code>, or add the MyBrain workflow to a repo.
-  </p>
+  <div class="dash">
+    <section class="panel vitals-panel" aria-labelledby="h-vitals">
+      <h3 id="h-vitals" class="panel-h"><i class="pd cyan"></i>Brain vitals</h3>
+      <div id="vitals" class="vitals"></div>
+    </section>
+    <section class="panel" aria-labelledby="h-now">
+      <h3 id="h-now" class="panel-h"><i class="pd violet"></i>Activity <span id="now-count" class="panel-n"></span></h3>
+      <div id="jobs" class="jobs" aria-live="polite"></div>
+      <p id="now-empty" class="panel-empty">Quiet. No robot is mapping right now.</p>
+    </section>
+    <section class="panel" aria-labelledby="h-alerts">
+      <h3 id="h-alerts" class="panel-h"><i class="pd red"></i>Alerts <span id="alert-count" class="panel-n"></span></h3>
+      <div id="alerts" class="alerts" aria-live="polite"></div>
+    </section>
+    <section class="panel maps-panel" aria-labelledby="h-maps">
+      <h3 id="h-maps" class="panel-h"><i class="pd green"></i>Maps <span id="map-count" class="panel-n"></span></h3>
+      <div id="map-list" class="map-list" aria-live="polite"></div>
+      <p id="home-empty" class="empty" hidden>
+        No maps yet. Tap <b>+</b> and pick a repository.
+      </p>
+    </section>
+  </div>
   <footer class="home-foot">
     <button id="install-btn" class="btn" hidden>Install app</button>
     <span id="version" class="muted"></span>

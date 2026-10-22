@@ -42,6 +42,20 @@ HEADERS = """/*
 """
 
 
+def vitals(data: dict) -> dict:
+    """The home screen's per-map numbers: the busiest neurons, how many stand
+    alone, how many files. Computed here so the phone never loads a whole map
+    just to draw the dashboard."""
+    nodes = data.get("nodes") or {}
+    labels, deg = nodes.get("label") or [], nodes.get("deg") or []
+    order = sorted(range(len(deg)), key=lambda i: -deg[i])
+    return {
+        "cores": [labels[i] for i in order[:5] if i < len(labels)],
+        "unlinked": sum(1 for d in deg if d == 0),
+        "files": len(data.get("files") or []),
+    }
+
+
 def build(maps_root: Path | None, out: Path) -> dict:
     if out.exists():
         shutil.rmtree(out)
@@ -70,6 +84,7 @@ def build(maps_root: Path | None, out: Path) -> dict:
                 "published": data.get("published"),
                 "commit": data.get("commit"),
                 "source": data.get("source"),
+                **vitals(data),
             })
             shutil.copytree(d, maps_out / d.name)
     index = {"maps": entries}
