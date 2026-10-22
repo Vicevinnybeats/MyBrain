@@ -17,6 +17,7 @@
   const R = 100;                         // brain radius, world units
   const MAX_PULSES = 90;
   const MAX_AGENTS = 16;
+  const MAX_MARKERS = 7;            // the biggest lobes, glowing around the brain
 
   const hex = (h) => new window.THREE.Color(h);
 
@@ -83,6 +84,7 @@
       this._buildShell();
       this._buildPulses();
       this._buildAgents();
+      this._buildMarkers();
 
       // ---- glow: a bloom pass at reduced resolution (its output is soft anyway)
       this.composer = new T.EffectComposer(renderer);
@@ -116,6 +118,7 @@
       this.composer.dispose && this.composer.dispose();
       this.renderer.dispose();
       if (this.labelBox) this.labelBox.innerHTML = '';
+      this._lbl = null;
     }
 
     // ---------------------------------------------------------------- layout --
@@ -124,12 +127,16 @@
       // lobes, biggest first, spread over a sphere (Fibonacci points)
       const sizes = new Map();
       for (let i = 0; i < n; i++) sizes.set(this.lobe[i], (sizes.get(this.lobe[i]) || 0) + 1);
-      const order = [...sizes.keys()].sort((a, b) => sizes.get(b) - sizes.get(a));
+      const bySize = [...sizes.keys()].sort((a, b) => sizes.get(b) - sizes.get(a));
+      // Interleave by the golden ratio, so lobes of similar size (above all the
+      // biggest, which carry the markers) land far apart instead of round one pole.
+      const order = bySize.map((c, k) => [c, (k * 0.6180339887498949 + 0.5) % 1]).sort((a, b) => a[1] - b[1]).map(x => x[0]);
       const dir = new Map(), K = order.length, golden = Math.PI * (3 - Math.sqrt(5));
       order.forEach((c, k) => {
         const y = 1 - 2 * (k + 0.5) / K, r = Math.sqrt(1 - y * y), th = golden * k;
         dir.set(c, [Math.cos(th) * r, y, Math.sin(th) * r]);
       });
+      this._lobeDir = dir;
       // how spread a lobe is: big lobes take a wider patch
       const spread = (c) => Math.min(0.9, 0.25 + 0.6 * Math.sqrt(sizes.get(c) / n));
 
@@ -145,9 +152,9 @@
         let x = d[0] + gauss() * sp, y = d[1] + gauss() * sp, z = d[2] + gauss() * sp;
         const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
         let r;
-        if (this.deg[i] <= 1) { this.shell[i] = 1; r = R * (0.94 + 0.08 * rand()); }
+        if (this.deg[i] <= 1) { this.shell[i] = 1; r = R * (0.95 + 0.1 * rand()); }
         // the core fills a ball (cube root = even density); busy neurons sit a little deeper
-        else r = R * 0.72 * Math.cbrt(rand()) * (0.65 + 0.35 * Math.sqrt(rank[i]));
+        else r = R * 0.56 * Math.cbrt(rand()) * (0.6 + 0.4 * Math.sqrt(rank[i]));
         P[3 * i] = x * r; P[3 * i + 1] = y * r; P[3 * i + 2] = z * r;
       }
       // pull connected core neurons toward their neighbours, so synapses stay short
@@ -370,7 +377,7 @@
       this.scene.add(new T.LineSegments(g, new T.LineBasicMaterial({ vertexColors: true, transparent: true,
         opacity: 1, depthWrite: false, blending: T.AdditiveBlending })));
       // glowing dots: the sessions themselves, and the head of each beam
-      const SPR = 16 + 64;
+      const SPR = MAX_AGENTS + MAX_MARKERS + 64;
       this.sprPos = new Float32Array(3 * SPR); this.sprCol = new Float32Array(3 * SPR); this.sprSize = new Float32Array(SPR);
       const sg = new T.BufferGeometry();
       sg.setAttribute('position', new T.BufferAttribute(this.sprPos, 3));
@@ -391,6 +398,37 @@
         transparent: true, depthWrite: false, blending: T.AdditiveBlending,
       });
       this.scene.add(new T.Points(sg, this.sprMat));
+    }
+
+    // The important points: the biggest lobes, each a glowing labelled dot outside
+    // the shell in its own direction, firing now and then into its neurons.
+    _buildMarkers() {
+      const T = window.THREE, members = new Map();
+      for (let i = 0; i < this.n; i++) {
+        const c = this.lobe[i];
+        if (!members.has(c)) members.set(c, []);
+        members.get(c).push(i);
+      }
+      const big = [...members.entries()].filter(([c]) => this.lobeName.has(c))
+        .sort((a, b) => b[1].length - a[1].length).slice(0, Math.min(MAX_MARKERS, this.phone ? 6 : MAX_MARKERS));
+      this.markers = big.map(([c, ids]) => {
+        const d = this._lobeDir.get(c) || [1, 0, 0];
+        const color = PALETTE[this.lobeColor.get(c) ?? 9];
+        return { id: 'lobe:' + c, lobe: c, name: this.lobeName.get(c) || `Lobe ${c}`, color, c: hex(color).lerp(hex('#ffffff'), 0.15),
+          p: new T.Vector3(d[0] * R * 1.3, d[1] * R * 1.05, d[2] * R * 1.3),
+          ids: ids.sort((a, b) => this.deg[b] - this.deg[a]).slice(0, 60) };
+      });
+    }
+
+    _markerBeams(now) {
+      if (!this.animate || !this.markers.length || now - (this._lastMarkerBeam || 0) < (this.phone ? 1100 : 750)) return;
+      this._lastMarkerBeam = now;
+      const vis = this.markers.filter(m => !this.hiddenLobes.has(m.lobe));
+      if (!vis.length) return;
+      const m = vis[Math.floor(Math.random() * vis.length)];
+      const node = m.ids[Math.floor(Math.pow(Math.random(), 2) * m.ids.length)];
+      this.beams.push({ a: m, node, kind: 'read', born: now, dur: 1600, ambient: true });
+      if (this.beams.length > 64) this.beams.shift();
     }
 
     // ------------------------------------------------------------ public API --
@@ -450,7 +488,7 @@
       x /= m; y /= m; z /= m;
       let r2 = 0;
       const far = (i) => { if (this.hiddenLobes.has(this.lobe[i])) return; const d = (P[3 * i] - x) ** 2 + (P[3 * i + 1] - y) ** 2 + (P[3 * i + 2] - z) ** 2; if (d > r2) r2 = d; };
-      if (ids) ids.forEach(far); else r2 = (R * 1.2) ** 2;
+      if (ids) ids.forEach(far); else r2 = (R * (this.markers && this.markers.length ? 1.32 : 1.2)) ** 2;
       return { c: [x, y, z], r: Math.max(Math.sqrt(r2), 6) };
     }
 
@@ -605,6 +643,13 @@
         const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
         const touch = down.touch; down = null;
         if (moved > 8 || dt > 600) return;
+        const rect = c.getBoundingClientRect();
+        for (const m of this.markers) {
+          const sm = this._screenOfVec(m.p);
+          if (sm && Math.hypot(sm[0] - (e.clientX - rect.left), sm[1] - (e.clientY - rect.top)) < (touch ? 26 : 14)) {
+            this.select(-1); this.controls.autoRotate = false; this.fit(true, m.ids); return;
+          }
+        }
         const i = this.pick(e.clientX, e.clientY, touch ? 22 : 12);
         this.select(i);
       };
@@ -648,6 +693,7 @@
       this.controls.update(dt);
       const live = this.animate || this._fly || this._userMoving || this.beams.length || this.agents.length || this.controls.autoRotate;
       if (this.animate) this._stepPulses(now, dt);
+      this._markerBeams(now);
       this._stepBeams(now);
       const moving = Boolean(this._userMoving || this._fly);
       if (moving !== this._wasMoving) {
@@ -655,6 +701,12 @@
         const n = this.edgeGeom.index ? this.edgeGeom.index.count : 0;
         this.edgeGeom.setDrawRange(0, moving ? Math.min(n, 2 * this.moveCap) : Infinity);
         this.membrane.geometry.setDrawRange(0, moving && this.phone ? 2 * Math.floor(this.membrane.geometry.index.count / 6) : Infinity);
+        if (this.phone) {
+          const ratio = moving ? Math.min(this.dpr, 0.7) : this.dpr, k = this.H * ratio * 0.5;
+          this.renderer.setPixelRatio(ratio);
+          this.renderer.setSize(this.W, this.H, false);
+          this.nodeMat.uniforms.uScale.value = k; this.pulseMat.uniforms.uScale.value = k; this.sprMat.uniforms.uScale.value = k;
+        }
         if (!moving) this._dirty = true;
       }
       // a phone turning on its own needs no more than 30 frames a second
@@ -665,7 +717,7 @@
         const t0 = performance.now();
         if (this.useBloom) this.composer.render(); else this.renderer.render(this.scene, this.camera);
         this._watchSpeed(performance.now() - t0, now);
-        this._labels();
+        this._labels(now);
       }
       if (live) { this._loopOn = true; requestAnimationFrame(this._frame); }
     }
@@ -737,8 +789,14 @@
         sp.set([a.p.x, a.p.y, a.p.z], 3 * k); sc.set([a.c.r, a.c.g, a.c.b], 3 * k);
         ss[k] = 9 + 1.5 * Math.sin(now / 400 + k);
       });
+      this.markers.forEach((m, k) => {
+        const j = MAX_AGENTS + k;
+        if (this.hiddenLobes.has(m.lobe)) return;
+        sp.set([m.p.x, m.p.y, m.p.z], 3 * j); sc.set([m.c.r, m.c.g, m.c.b], 3 * j);
+        ss[j] = 11 + 1.5 * Math.sin(now / 520 + k * 1.7);
+      });
       this.beams.forEach((b, k) => {
-        const age = (now - b.born) / b.dur, grow = Math.min(1, age * 3), j = 16 + k;
+        const age = (now - b.born) / b.dur, grow = Math.min(1, age * 3), j = MAX_AGENTS + MAX_MARKERS + k;
         const tx = P[3 * b.node], ty = P[3 * b.node + 1], tz = P[3 * b.node + 2];
         sp.set([b.a.p.x + (tx - b.a.p.x) * grow, b.a.p.y + (ty - b.a.p.y) * grow, b.a.p.z + (tz - b.a.p.z) * grow], 3 * j);
         sc.set([b.a.c.r, b.a.c.g, b.a.c.b], 3 * j);
@@ -751,39 +809,67 @@
       this.beamGeom.attributes.color.needsUpdate = true;
     }
 
-    // Names of the core neurons (and the selection) float beside them.
-    _labels() {
+    // Names float beside the core neurons, the selection, the lobe markers and the
+    // sessions. The label elements are kept and only moved: rewriting them every
+    // frame made a phone stutter while a finger turned the brain.
+    _labels(now = performance.now()) {
       const box = this.labelBox;
       if (!box) return;
-      const want = new Set();
-      if (this.selected >= 0) want.add(this.selected);
-      if (this.path) { want.add(this.path.nodes[0]); want.add(this.path.nodes[this.path.nodes.length - 1]); }
-      if (this.focus && !this.path) for (const i of [...this.focus].sort((a, b) => this.deg[b] - this.deg[a]).slice(0, 8)) want.add(i);
-      for (const i of this.byDeg.slice(0, this.small ? 8 : 16)) if (!this.hiddenLobes.has(this.lobe[i])) want.add(i);
-      this.agents.forEach(a => want.add('a:' + a.id));
-      let html = '';
+      if (this.phone && this._wasMoving && now - (this._lastLabels || 0) < 90) return;
+      this._lastLabels = now;
+      this._lbl = this._lbl || new Map();
+      const m = this._project();
+      const proj = (x, y, z) => {
+        const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+        if (w <= 0.1) return null;
+        return [((m[0] * x + m[4] * y + m[8] * z + m[12]) / w * 0.5 + 0.5) * this.W,
+                (1 - ((m[1] * x + m[5] * y + m[9] * z + m[13]) / w * 0.5 + 0.5)) * this.H];
+      };
+      const items = [];   // [key, text, x, y, cls, color]
+      const P = this.pos;
+      for (const a of this.agents) { const s = proj(a.p.x, a.p.y, a.p.z); if (s) items.push(['a:' + a.id, a.name, s[0], s[1] + 10, 'agent', a.color]); }
+      for (const mk of this.markers) {
+        if (this.hiddenLobes.has(mk.lobe)) continue;
+        const s = proj(mk.p.x, mk.p.y, mk.p.z); if (s) items.push(['m:' + mk.lobe, mk.name, s[0], s[1] + 9, 'agent marker', mk.color]);
+      }
+      const want = [];
+      if (this.selected >= 0) want.push(this.selected);
+      if (this.path) want.push(this.path.nodes[0], this.path.nodes[this.path.nodes.length - 1]);
+      if (this.focus && !this.path) want.push(...[...this.focus].sort((a, b) => this.deg[b] - this.deg[a]).slice(0, 8));
+      for (const i of this.byDeg.slice(0, this.small ? 6 : 14)) if (!this.hiddenLobes.has(this.lobe[i])) want.push(i);
       const placed = [];
       const free = (x, y, w) => {
         for (const [px, py, pw] of placed) if (Math.abs(px - x) < (pw + w) / 2 + 6 && Math.abs(py - y) < 16) return false;
         placed.push([x, y, w]); return true;
       };
+      // session and lobe names never sit on top of each other: nudge down until free
+      for (const it of items) {
+        const w = Math.min(it[1].length, 30) * 7.2;
+        for (let k = 0; k < 4 && placed.some(([px, py, pw]) => Math.abs(px - it[2]) < (pw + w) / 2 + 4 && Math.abs(py - it[3]) < 14); k++) it[3] += 14;
+        placed.push([it[2], it[3], w]);
+      }
+      const seen = new Set();
       for (const i of want) {
-        if (typeof i === 'string') {
-          const a = this.agents.find(x => 'a:' + x.id === i);
-          const s = this._screenOfVec(a.p);
-          if (s) html += `<span class="lbl3d agent" style="transform:translate(${s[0].toFixed(0)}px,${(s[1] + 8).toFixed(0)}px);color:${a.color}">${esc(a.name)}</span>`;
-          continue;
-        }
-        const s = this.screenOf(i);
+        if (seen.has(i)) continue; seen.add(i);
+        const s = proj(P[3 * i], P[3 * i + 1], P[3 * i + 2]);
         if (!s || s[0] < -50 || s[1] < -20 || s[0] > this.W + 50 || s[1] > this.H) continue;
         const label = this.map.nodes.label[i];
         if (i !== this.selected && !free(s[0], s[1], Math.min(label.length, 28) * 7)) continue;
-        if (i === this.selected) placed.push([s[0], s[1], label.length * 8]);
-        const dim = this.focus && !this.focus.has(i) ? ' dim' : '';
-        const sel = i === this.selected ? ' sel' : '';
-        html += `<span class="lbl3d${dim}${sel}" style="transform:translate(${s[0].toFixed(0)}px,${(s[1] - 8).toFixed(0)}px)">${esc(this.map.nodes.label[i])}</span>`;
+        const cls = (this.focus && !this.focus.has(i) ? 'dim' : '') + (i === this.selected ? ' sel' : '');
+        items.push(['n:' + i, label, s[0], s[1] - 8, cls, null]);
       }
-      if (html !== this._lastLabels) { box.innerHTML = html; this._lastLabels = html; }
+      const keep = new Set();
+      for (const [key, text, x, y, cls, color] of items) {
+        keep.add(key);
+        let el = this._lbl.get(key);
+        if (!el) { el = document.createElement('span'); el.textContent = text; box.appendChild(el); this._lbl.set(key, el); }
+        const c = 'lbl3d ' + cls;
+        if (el.className !== c) el.className = c;
+        if (color && el.style.color !== color) el.style.color = color;
+        const half = Math.min(text.length, 30) * (cls.includes("agent") ? 4.6 : 3.6), cx = Math.max(half + 4, Math.min(this.W - half - 4, x));
+        el.style.transform = `translate(${cx.toFixed(0)}px,${y.toFixed(0)}px)`;
+      }
+      for (const [key, el] of this._lbl) if (!keep.has(key)) { el.remove(); this._lbl.delete(key); }
     }
 
     _screenOfVec(v) {
