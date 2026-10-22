@@ -983,6 +983,9 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
     if platform == "claude" and not project:
         _install_claude_hook(Path.home(), project=False)
         print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")
+        from mybrain.activity import install_activity_hook
+        if install_activity_hook(Path.home() / ".claude" / "settings.json"):
+            print("  ~/.claude/settings.json  ->  live activity for the app (MYBRAIN_ACTIVITY=off to stop)")
 
     if platform == "opencode":
         _install_opencode_plugin(project_dir if project else Path("."))

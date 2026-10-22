@@ -76,6 +76,7 @@
     await refreshHome(true);
     clearInterval(homeTimer);
     homeTimer = setInterval(() => { if (!$('#home').hidden && !document.hidden) refreshHome(false); }, 20000);
+    watchActivity(5000);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('#home').hidden) refreshHome(false); });
 
@@ -101,6 +102,122 @@
     renderActivity();
   }
 
+  // ---- live activity: what Claude sessions read and change (mybrain-activity hook)
+  const SES_COLORS = ['#f59e0b', '#e879f9', '#60a5fa', '#34d399', '#f87171', '#a78bfa', '#facc15', '#2dd4bf'];
+  // each session keeps the colour it was first given, in order of appearance
+  const sesColors = new Map();
+  const sesColor = (id) => {
+    if (!sesColors.has(id)) sesColors.set(id, SES_COLORS[sesColors.size % SES_COLORS.length]);
+    return sesColors.get(id);
+  };
+  const act = { events: [], sessions: [], since: 0, off: false, skew: 0 };
+  let actTimer = 0;
+  async function fetchActivity() {
+    if (!getKey() || act.off) return false;
+    let res;
+    try { res = await apiCall('api/activity?since=' + act.since); } catch (e) { return false; }
+    if (res.status === 503) { act.off = true; return false; }
+    if (res.status !== 200) return false;
+    const d = res.data, fresh = d.events || [];
+    act.skew = (d.now || Date.now()) - Date.now();
+    if (fresh.length) {
+      act.events = act.events.concat(fresh).slice(-300);
+      act.since = fresh[fresh.length - 1].t;
+    }
+    act.sessions = (d.sessions || []).sort((a, b) => a.first - b.first);
+    act.sessions.forEach(x => sesColor(x.id));
+    onActivity(fresh);
+    return true;
+  }
+  function watchActivity(ms) {
+    clearInterval(actTimer);
+    actTimer = setInterval(() => { if (!document.hidden) fetchActivity(); }, ms);
+    fetchActivity();
+  }
+  const sesName = (s) => `Claude · ${short(s.repo || '?')}`;
+  const tokTotal = (t) => (t ? t.input + t.output + t.cache : 0);
+  const kTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
+  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const tail = (p, n = 46) => (p.length > n ? '…' + p.slice(-n + 1) : p);
+
+  function onActivity(fresh) {
+    if (!$('#home').hidden) { renderSessions(); renderFeed(); renderAlerts(); renderVitals(); renderActivity(); }
+    if (graph && graph.setAgents && mapName) brainActivity(fresh);
+  }
+
+  function liveSessions(windowMs = 15 * 60000) {
+    const now = Date.now() + act.skew;
+    return act.sessions.filter(s => now - s.last < windowMs).sort((a, b) => b.last - a.last);
+  }
+
+  function renderSessions() {
+    const now = Date.now() + act.skew;
+    $('#sessions').innerHTML = liveSessions().map(s => {
+      const idle = now - s.last > 2 * 60000;
+      const doing = s.lastPath ? `<b>${esc((s.lastKind || '').toUpperCase())}</b> ${esc(tail(s.lastPath))}` : 'started';
+      return `<div class="ses${idle ? ' idle' : ''}" style="--c:${sesColor(s.id)}"><span class="dot"></span>
+        <span class="nm">${esc(sesName(s))}</span><span class="tk" title="tokens this session">${tokTotal(s.tokens) ? '~' + kTok(tokTotal(s.tokens)) : ''}</span>
+        <span class="now">${idle ? `idle ${esc(ago(new Date(s.last).toISOString()))} · ` : ''}${doing} · ${s.read} read · ${s.write} changed · ${s.search} searched</span></div>`;
+    }).join('');
+  }
+
+  function renderFeed() {
+    const ev = act.events.filter(e => e.kind !== 'tokens').slice(-40).reverse();
+    const byId = new Map(act.sessions.map(s => [s.id, s]));
+    $('#feed').innerHTML = ev.map(e => {
+      const s = byId.get(e.s) || { repo: e.repo };
+      return `<div class="fe" style="--c:${sesColor(e.s)}"><time>${clock(e.t)}</time><span class="who">${esc(short(s.repo || e.repo))}</span>
+        <span class="kd ${esc(e.kind)}">${esc(e.kind.toUpperCase())}</span><span class="pth">${esc(tail(e.path || ''))}</span></div>`;
+    }).join('');
+  }
+
+  // two sessions changing the same file within ten minutes
+  function writeClashes() {
+    const now = Date.now() + act.skew, last = new Map(), out = [];
+    for (const e of act.events) {
+      if (e.kind !== 'write' || !e.path || now - e.t > 10 * 60000) continue;
+      const k = e.repo + '\n' + e.path, prev = last.get(k);
+      if (prev && prev.s !== e.s && !out.some(o => o.k === k)) out.push({ k, a: prev, b: e });
+      last.set(k, e);
+    }
+    return out;
+  }
+
+  // 3D brain: sessions working in this map's repository orbit it and fire into the files they touch
+  let brainSeen = 0;
+  function brainActivity(fresh) {
+    const m = (window.__mapsIndex || []).find(x => x.name === mapName) || {};
+    const mine = (s) => (m.source && (s.repo || '').toLowerCase() === m.source.toLowerCase()) ||
+      short(s.repo || '').toLowerCase() === (mapName || '').toLowerCase();
+    const agents = liveSessions().filter(mine).map(s => ({ id: s.id, name: sesName(s), color: sesColor(s.id) }));
+    const key = agents.map(a => a.id).join(',');
+    if (key !== graph._agentKey) { graph.setAgents(agents); graph._agentKey = key; }
+    for (const e of fresh) {
+      if (e.t <= brainSeen || !e.path || !agents.some(a => a.id === e.s)) continue;
+      const node = nodeForPath(e.path);
+      if (node >= 0) graph.fire(e.s, node, e.kind);
+    }
+    if (fresh.length) brainSeen = Math.max(brainSeen, fresh[fresh.length - 1].t);
+  }
+  let fileNodes = null;
+  function nodeForPath(path) {
+    if (!map) return -1;
+    if (!fileNodes || fileNodes.map !== map) {
+      const best = new Map(), N = map.nodes;
+      for (let i = 0; i < N.label.length; i++) {
+        const f = map.files[N.file[i]];
+        if (!f) continue;
+        const cur = best.get(f), isFile = N.label[i] === f.split('/').pop();
+        if (cur === undefined || isFile || (!(N.label[cur] === f.split('/').pop()) && N.deg[i] > N.deg[cur])) best.set(f, i);
+      }
+      fileNodes = { map, best };
+    }
+    const b = fileNodes.best;
+    if (b.has(path)) return b.get(path);
+    for (const [f, i] of b) if (f.endsWith('/' + path) || path.endsWith('/' + f)) return i;
+    return -1;
+  }
+
   function renderVitals() {
     const idx = (window.__mapsIndex || []).filter(m => !loadRemoving()[m.name]);
     const sum = (f) => idx.reduce((a, m) => a + (f(m) || 0), 0);
@@ -118,6 +235,9 @@
       tile('Lobes', fmt(lobes), 100, lobes ? `${Math.round(neurons / Math.max(1, lobes))} neurons each` : ''),
       tile('Linked', `${linkedPct.toFixed(0)}%`, linkedPct, `${fmt(unlinked)} stand alone`),
       tile('Files', fmt(files), 100, idx.length ? `${Math.round(files / idx.length)} per map` : ''),
+      tile('Tokens · 24h', act.sessions.length ? '~' + kTok(act.sessions.reduce((a, x) => a + tokTotal(x.tokens), 0)) : '—', 100,
+        act.sessions.length ? `${act.sessions.length} Claude session${act.sessions.length === 1 ? '' : 's'}` : (getKey() ? 'no sessions yet' : 'needs your key')),
+      tile('Live now', fmt(liveSessions(2 * 60000).length), 100, `${fmt(act.events.filter(e => e.kind === 'read' && Date.now() + act.skew - e.t < 3600000).length)} reads this hour`),
     ].join('');
   }
 
@@ -138,6 +258,9 @@
         out.push(['', `Mapping ${esc(short(r.repo || r.title || ''))} failed`, `<a href="${esc(r.url)}" target="_blank" rel="noopener">See why on GitHub</a>`, r.updated]);
       }
     }
+    for (const c of writeClashes()) {
+      out.push(['', `Write clash: ${esc(tail(c.b.path, 40))}`, `Two Claude sessions changed this file in ${esc(short(c.b.repo))} within ten minutes.`, new Date(c.b.t).toISOString()]);
+    }
     if (!getKey()) out.push(['warn', 'Mapping status is hidden on this device', 'Tap + and enter your MyBrain key once to see runs and failures here.']);
     $('#alert-count').textContent = out.filter(a => a[0] !== 'warn' || a[1].includes('expires')).length || '';
     $('#alerts').innerHTML = out.length ? out.map(([cls, title, body, when]) =>
@@ -147,8 +270,10 @@
 
   function renderActivity() {
     const active = jobs.filter(j => j.phase !== 'ready' && j.phase !== 'failed').length;
-    $('#now-count').textContent = active ? `${active} running` : '';
-    $('#now-empty').hidden = jobs.length > 0;
+    const live = liveSessions(2 * 60000).length;
+    const parts = [live ? `${live} session${live === 1 ? '' : 's'}` : '', active ? `${active} mapping` : ''].filter(Boolean);
+    $('#now-count').textContent = parts.join(' · ');
+    $('#now-empty').hidden = jobs.length > 0 || liveSessions().length > 0 || act.events.length > 0;
   }
 
   function renderMaps(idx) {
@@ -313,7 +438,7 @@
       catch (e) { console.warn('3D view failed, using 2D', e); three = false; $('#canvas').hidden = false; $('#canvas3d').hidden = true; }
     }
     window.__mybrain = graph;   // handy for debugging / tests
-    if (three) { applyAnim(); setProgress(null); layoutInsets(); return; }
+    if (three) { applyAnim(); setProgress(null); layoutInsets(); brainSeen = Date.now() + act.skew - 60000; watchActivity(4000); return; }
     graph = new window.BrainGraph($('#canvas'), map, opts);
     window.__mybrain = graph;
     applyAnim();

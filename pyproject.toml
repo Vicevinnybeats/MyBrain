@@ -123,6 +123,7 @@ all = ["mcp>=1,<3", "starlette>=1.3.1,<2", "neo4j", "falkordb", "pypdf>=6.16.1",
 mybrain = "mybrain.__main__:main"
 mybrain-mcp = "mybrain.serve:_main"
 mybrain-publish = "mybrain.publish:main"
+mybrain-activity = "mybrain.activity:main"
 
 [dependency-groups]
 dev = [

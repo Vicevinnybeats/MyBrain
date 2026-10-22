@@ -1,6 +1,6 @@
 // Tests for webapp/worker.js against a fake GitHub: node webapp/tests/worker.test.mjs
 import assert from 'node:assert/strict';
-import worker from '../worker.js';
+import worker, { Activity } from '../worker.js';
 
 const SHA_OLD = 'a'.repeat(40), SHA_NEW = 'b'.repeat(40);
 const calls = [];
@@ -19,7 +19,10 @@ globalThis.fetch = async (url, init = {}) => {
 const index = { maps: [{ name: 'gnarl', commit: SHA_OLD, source: 'Vicevinnybeats/GNARL' },
                        { name: 'cardly', commit: SHA_OLD, source: 'Vicevinnybeats/Cardly' },
                        { name: 'old', commit: SHA_OLD }] };
+const store = new Map();
+const activity = new Activity({ storage: { get: async (k) => store.get(k), put: async (k, v) => { store.set(k, structuredClone(v)); } } });
 const env = {
+  ACTIVITY: { idFromName: () => 'all', get: () => ({ fetch: (r) => activity.fetch(r) }) },
   GITHUB_TOKEN: { get: async () => 'tok' }, ADD_KEY: 'k', MAPS_REPO: 'Vicevinnybeats/mybrain-maps',
   ASSETS: { fetch: async () => Response.json(index) },
 };
@@ -69,6 +72,29 @@ assert.equal((await rm({ name: 'cardly' })).status, 200);
 const rmCall = calls.find(c => c.url.includes('/remove-map.yml/dispatches'));
 assert.ok(rmCall.url.includes('/repos/Vicevinnybeats/mybrain-maps/'));
 assert.deepEqual(JSON.parse(rmCall.init.body), { ref: 'main', inputs: { name: 'cardly' } });
+
+// live activity: open to send (shaped and limited), key to read
+const post = (b) => req('/api/activity', { method: 'POST', body: JSON.stringify(b) });
+assert.equal((await post({ session: 'abc123', repo: 'Vicevinnybeats/GNARL', kind: 'read', path: 'src/a.cpp' })).status, 200);
+assert.equal((await post({ session: 'abc123', repo: 'Vicevinnybeats/GNARL', kind: 'write', path: 'src/a.cpp' })).status, 200);
+assert.equal((await post({ session: 'abc123', repo: 'Vicevinnybeats/GNARL', kind: 'tokens', tokens: { input: 5, output: 7, cache: 'x' } })).status, 200);
+for (const bad of [{ session: 'a b', repo: 'x', kind: 'read' }, { session: 's', repo: '../x', kind: 'read' },
+                   { session: 's', repo: 'x', kind: 'delete' }, { session: 's', repo: 'x', kind: 'read', path: 'a\nb' },
+                   { session: 's', repo: 'x', kind: 'read', path: 'p'.repeat(301) }])
+  assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+assert.equal((await req('/api/activity', { method: 'POST', body: 'x'.repeat(3000) })).status, 413);
+assert.equal((await req('/api/activity')).status, 401);
+const feed = await (await req('/api/activity', { headers: { 'x-mybrain-key': 'k' } })).json();
+assert.deepEqual(feed.events.map(e => [e.kind, e.path]), [['read', 'src/a.cpp'], ['write', 'src/a.cpp']]);
+const ses = feed.sessions[0];
+assert.equal(ses.read, 1); assert.equal(ses.write, 1); assert.deepEqual(ses.tokens, { input: 5, output: 7, cache: 0 });
+assert.equal(ses.lastPath, 'src/a.cpp');
+const later = await (await req('/api/activity?since=' + (Date.now() + 1000), { headers: { 'x-mybrain-key': 'k' } })).json();
+assert.equal(later.events.length, 0);
+// rate limit: one session can't flood the feed
+let limited = 0;
+for (let k = 0; k < 130; k++) if ((await post({ session: 'flood', repo: 'x', kind: 'read', path: 'a' })).status === 429) limited++;
+assert.ok(limited >= 9, 'rate limit');
 
 // hourly refresh: only Cardly changed (GNARL same commit; 'old' has no source)
 calls.length = 0;

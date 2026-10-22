@@ -8,6 +8,8 @@
  *   GET  /api/archive?...        the repository's code, for that mapping run only
  *                                (a signed, 30-minute pass; see below)
  *   GET  /api/health             which settings this deployment can see (names only)
+ *   POST /api/activity           a Claude session reports a read / write / search (no key)
+ *   GET  /api/activity?since=    the live activity feed and sessions (key)
  * and an hourly timer that re-maps every mapped repository that has new commits.
  *
  * Only ONE credential exists: the GITHUB_TOKEN secret (fine-grained; all
@@ -164,6 +166,15 @@ async function api(request, env, ctx, path) {
     return new Response(r.body, { headers: { 'content-type': 'application/gzip', 'cache-control': 'no-store' } });
   }
 
+  // Claude sessions report what they do. No key: see Activity above.
+  if (path === '/api/activity' && request.method === 'POST') {
+    const stub = activityStub(env);
+    if (!stub) return json({ error: 'activity-off' }, 503);
+    const body = await request.text();
+    if (body.length > 2048) return json({ error: 'too-big' }, 413);
+    return stub.fetch(new Request('https://activity/add', { method: 'POST', body }));
+  }
+
   if (!(await allowed(request, env, ctx))) {
     return json({ error: 'locked', needKey: Boolean(await setting(env.ADD_KEY)) }, 401);
   }
@@ -214,6 +225,12 @@ async function api(request, env, ctx, path) {
     return json({ ok: true, name });
   }
 
+  if (path === '/api/activity' && request.method === 'GET') {
+    const stub = activityStub(env);
+    if (!stub) return json({ error: 'activity-off', events: [], sessions: [] }, 503);
+    return stub.fetch(new Request('https://activity/list?since=' + encodeURIComponent(url.searchParams.get('since') || '0')));
+  }
+
   if (path === '/api/status' && request.method === 'GET') {
     const r = await gh(env, `/repos/${env.MAPS_REPO}/actions/workflows/add-map.yml/runs?per_page=8`);
     if (!r.ok) return json({ error: 'github', status: r.status }, 502);
@@ -241,6 +258,78 @@ async function api(request, env, ctx, path) {
   }
   return json({ error: 'not-found' }, 404);
 }
+
+// ---- live activity -----------------------------------------------------------
+// What Claude sessions read and change (sent by `mybrain-activity`, a Claude Code
+// hook) is kept for a day in one Durable Object, so every phone and computer sees
+// the same feed. Sending is open (sessions hold no key) but strictly shaped and
+// rate limited; reading needs the key, like the rest of the app.
+const KINDS = new Set(['read', 'write', 'search', 'run', 'start', 'tokens']);
+const DAY = 86400000;
+
+function cleanEvent(b) {
+  if (!b || typeof b !== 'object') return null;
+  const session = String(b.session || ''), repo = String(b.repo || ''), kind = String(b.kind || '');
+  if (!/^[\w-]{1,64}$/.test(session) || !/^[\w.-]{1,100}(\/[\w.-]{1,100})?$/.test(repo) || !KINDS.has(kind)) return null;
+  if (repo.split('/').some(p => p === '.' || p === '..')) return null;
+  const ev = { session, repo, kind };
+  if (b.path != null) {
+    const path = String(b.path);
+    if (path.length > 300 || /[\u0000-\u001f]/.test(path)) return null;
+    ev.path = path;
+  }
+  if (kind === 'tokens') {
+    const t = b.tokens || {}, n = (v) => Math.max(0, Math.min(1e11, Math.floor(Number(v) || 0)));
+    ev.tokens = { input: n(t.input), output: n(t.output), cache: n(t.cache) };
+  }
+  return ev;
+}
+
+export class Activity {
+  constructor(state) { this.state = state; this.data = null; this.rate = new Map(); }
+
+  async load() {
+    if (!this.data) this.data = (await this.state.storage.get('data')) || { events: [], sessions: {} };
+    const cut = Date.now() - DAY, d = this.data;
+    d.events = d.events.filter(e => e.t > cut);
+    for (const [k, v] of Object.entries(d.sessions)) if (v.last < cut) delete d.sessions[k];
+    return d;
+  }
+
+  limited(session) {
+    const minute = Math.floor(Date.now() / 60000);
+    if (this.rate.get('m') !== minute) { this.rate.clear(); this.rate.set('m', minute); }
+    const one = (this.rate.get(session) || 0) + 1, all = (this.rate.get('*') || 0) + 1;
+    this.rate.set(session, one); this.rate.set('*', all);
+    return one > 120 || all > 600;
+  }
+
+  async fetch(request) {
+    const d = await this.load();
+    if (request.method === 'POST') {
+      const ev = cleanEvent(await request.json().catch(() => null));
+      if (!ev) return json({ error: 'bad-event' }, 400);
+      if (this.limited(ev.session)) return json({ error: 'slow-down' }, 429);
+      const now = Date.now();
+      const s = d.sessions[ev.session] || (d.sessions[ev.session] = { id: ev.session, repo: ev.repo, first: now, last: now,
+        read: 0, write: 0, search: 0, run: 0, tokens: { input: 0, output: 0, cache: 0 } });
+      s.last = now; s.repo = ev.repo;
+      if (ev.kind === 'tokens') s.tokens = ev.tokens;
+      else {
+        if (ev.kind in s) s[ev.kind]++;
+        if (ev.path) { s.lastPath = ev.path; s.lastKind = ev.kind; }
+        d.events.push({ t: now, s: ev.session, repo: ev.repo, kind: ev.kind, path: ev.path || '' });
+        if (d.events.length > 500) d.events.splice(0, d.events.length - 500);
+      }
+      await this.state.storage.put('data', d);
+      return json({ ok: true });
+    }
+    const since = Number(new URL(request.url).searchParams.get('since')) || 0;
+    return json({ now: Date.now(), events: d.events.filter(e => e.t > since).slice(-200), sessions: Object.values(d.sessions) });
+  }
+}
+
+const activityStub = (env) => env.ACTIVITY && env.ACTIVITY.get(env.ACTIVITY.idFromName('all'));
 
 // Hourly: re-map each mapped repository whose newest commit differs from its map's.
 async function refreshAll(env) {
@@ -271,4 +360,4 @@ export default {
   },
 };
 
-export { parseRepo, passMessage };
+export { parseRepo, passMessage, cleanEvent };

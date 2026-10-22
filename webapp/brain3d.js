@@ -364,6 +364,28 @@
       this.beamGeom = g;
       this.scene.add(new T.LineSegments(g, new T.LineBasicMaterial({ vertexColors: true, transparent: true,
         opacity: 1, depthWrite: false, blending: T.AdditiveBlending })));
+      // glowing dots: the sessions themselves, and the head of each beam
+      const SPR = 16 + 64;
+      this.sprPos = new Float32Array(3 * SPR); this.sprCol = new Float32Array(3 * SPR); this.sprSize = new Float32Array(SPR);
+      const sg = new T.BufferGeometry();
+      sg.setAttribute('position', new T.BufferAttribute(this.sprPos, 3));
+      sg.setAttribute('color', new T.BufferAttribute(this.sprCol, 3));
+      sg.setAttribute('size', new T.BufferAttribute(this.sprSize, 1));
+      this.sprGeom = sg;
+      this.sprMat = new T.ShaderMaterial({
+        uniforms: { uScale: { value: 300 } },
+        vertexShader: `
+          attribute float size; attribute vec3 color; uniform float uScale; varying vec3 vC;
+          void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = clamp(size * uScale / -mv.z, 0.0, 40.0); gl_Position = projectionMatrix * mv; vC = color; }`,
+        fragmentShader: `
+          varying vec3 vC;
+          void main() { float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard;
+            float core = smoothstep(0.2, 0.0, d), halo = smoothstep(0.5, 0.0, d);
+            gl_FragColor = vec4(vC * (0.7 + 1.5 * core) + core * 0.4, halo * 0.8 + core); }`,
+        transparent: true, depthWrite: false, blending: T.AdditiveBlending,
+      });
+      this.scene.add(new T.Points(sg, this.sprMat));
     }
 
     // ------------------------------------------------------------ public API --
@@ -400,6 +422,7 @@
       const s = this.H * this.dpr * 0.5;
       this.nodeMat.uniforms.uScale.value = s;
       this.pulseMat.uniforms.uScale.value = s;
+      this.sprMat.uniforms.uScale.value = s;
       this.draw();
     }
 
@@ -513,14 +536,11 @@
     // Live sessions (step 3): [{id, name, color}] placed on a ring around the brain.
     setAgents(list) {
       const T = window.THREE;
-      this.agentGroup.clear();
+      // on a ring just outside the shell, so a phone's narrow view still shows them
       this.agents = list.slice(0, MAX_AGENTS).map((a, k, all) => {
-        const th = (k / Math.max(1, all.length)) * Math.PI * 2 + 0.4;
-        const p = new T.Vector3(Math.cos(th) * R * 1.75, Math.sin(th * 2) * R * 0.35, Math.sin(th) * R * 1.75);
-        const dot = new T.Mesh(new T.SphereGeometry(2.6, 12, 12), new T.MeshBasicMaterial({ color: hex(a.color) }));
-        dot.position.copy(p);
-        this.agentGroup.add(dot);
-        return { ...a, p };
+        const th = (k / Math.max(1, all.length)) * Math.PI * 2 + 0.6;
+        const p = new T.Vector3(Math.cos(th) * R * 1.32, R * (0.55 - 0.35 * (k % 2)), Math.sin(th) * R * 1.0);
+        return { ...a, p, c: hex(a.color) };
       });
       this.draw();
     }
@@ -621,7 +641,7 @@
       if (this.animate && !this.controls.autoRotate && !this._userMoving && this._idleAt &&
           this.selected < 0 && !this.path && now - this._idleAt > 9000) this.controls.autoRotate = true;
       this.controls.update(dt);
-      const live = this.animate || this._fly || this._userMoving || this.beams.length || this.controls.autoRotate;
+      const live = this.animate || this._fly || this._userMoving || this.beams.length || this.agents.length || this.controls.autoRotate;
       if (this.animate) this._stepPulses(now, dt);
       this._stepBeams(now);
       if (this._dirty || live) {
@@ -690,10 +710,27 @@
         const tx = P[3 * b.node], ty = P[3 * b.node + 1], tz = P[3 * b.node + 2];
         bp[6 * k] = b.a.p.x; bp[6 * k + 1] = b.a.p.y; bp[6 * k + 2] = b.a.p.z;
         bp[6 * k + 3] = b.a.p.x + (tx - b.a.p.x) * grow; bp[6 * k + 4] = b.a.p.y + (ty - b.a.p.y) * grow; bp[6 * k + 5] = b.a.p.z + (tz - b.a.p.z) * grow;
-        const c = hex(b.a.color);
+        const c = b.a.c;
         for (let v = 0; v < 2; v++) { bc[6 * k + 3 * v] = c.r * fade; bc[6 * k + 3 * v + 1] = c.g * fade; bc[6 * k + 3 * v + 2] = c.b * fade; }
       });
       this.beamGeom.setDrawRange(0, 2 * this.beams.length);
+      // dots: each session (breathing), then a bright head running down each beam
+      const sp = this.sprPos, sc = this.sprCol, ss = this.sprSize;
+      ss.fill(0);
+      this.agents.forEach((a, k) => {
+        sp.set([a.p.x, a.p.y, a.p.z], 3 * k); sc.set([a.c.r, a.c.g, a.c.b], 3 * k);
+        ss[k] = 9 + 1.5 * Math.sin(now / 400 + k);
+      });
+      this.beams.forEach((b, k) => {
+        const age = (now - b.born) / b.dur, grow = Math.min(1, age * 3), j = 16 + k;
+        const tx = P[3 * b.node], ty = P[3 * b.node + 1], tz = P[3 * b.node + 2];
+        sp.set([b.a.p.x + (tx - b.a.p.x) * grow, b.a.p.y + (ty - b.a.p.y) * grow, b.a.p.z + (tz - b.a.p.z) * grow], 3 * j);
+        sc.set([b.a.c.r, b.a.c.g, b.a.c.b], 3 * j);
+        ss[j] = (b.kind === 'write' ? 9 : 6) * (1 - Math.max(0, age - 0.6) / 0.4);
+      });
+      this.sprGeom.attributes.position.needsUpdate = true;
+      this.sprGeom.attributes.color.needsUpdate = true;
+      this.sprGeom.attributes.size.needsUpdate = true;
       this.beamGeom.attributes.position.needsUpdate = true;
       this.beamGeom.attributes.color.needsUpdate = true;
     }

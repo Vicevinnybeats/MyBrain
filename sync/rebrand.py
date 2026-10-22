@@ -285,6 +285,16 @@ PATCHES: list[tuple[str, str, str]] = [
      '        _install_claude_hook(Path.home(), project=False)\n'
      '        print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")\n\n'
      '    if platform == "opencode":\n        _install_opencode_plugin(project_dir if project else Path("."))\n'),
+    # 16. Live activity: what Claude reads and changes, sent to the app
+    #     (sync/overrides/mybrain/activity.py), installed with the global hook.
+    ("pyproject.toml", 'graphify-publish = "graphify.publish:main"\n',
+     'graphify-publish = "graphify.publish:main"\ngraphify-activity = "graphify.activity:main"\n'),
+    ("graphify/install.py",
+     '        print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")\n\n',
+     '        print("  ~/.claude/settings.json  ->  map-first hints before Grep/Read (any repo with a map)")\n'
+     '        from graphify.activity import install_activity_hook\n'
+     '        if install_activity_hook(Path.home() / ".claude" / "settings.json"):\n'
+     '            print("  ~/.claude/settings.json  ->  live activity for the app (MYBRAIN_ACTIVITY=off to stop)")\n\n'),
 ]
 
 # Applied to every text file BEFORE the generic rename (order matters).

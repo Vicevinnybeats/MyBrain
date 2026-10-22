@@ -134,6 +134,27 @@ One-time settings (already done for this app):
 2. **ADD_KEY** in the same Secrets Store: a passphrase. The app asks for it
    once per device, so nobody else can use your + button.
 
+### Brain Monitor (the home screen)
+
+The home screen refreshes itself while it is open:
+
+- **Brain vitals:** neurons, synapses, lobes and files across all maps, and
+  Claude's tokens in the last 24 hours.
+- **Activity:** every Claude session that is working right now (which repo,
+  what it last read or changed, its tokens), a live feed of reads, changes and
+  searches, and the mapping robots.
+- **Alerts:** GitHub refusing the app's token, the token expiring soon, a
+  failed mapping, or two sessions changing the same file (a write clash).
+- **In the 3D brain**, each session working in that repo is a coloured dot
+  that fires a beam into the file it reads or changes.
+
+Live activity comes from a small hook that `mybrain install` adds to Claude
+Code. It sends only the repo name, a short session id, the kind of action,
+the file path and token totals: never file contents, commands or search
+text. Turn it off with `MYBRAIN_ACTIVITY=off`. A cloud environment must allow
+the app's address (`mybrain.<you>.workers.dev`) in its network settings;
+Claude Code on your own computer needs nothing.
+
 ### Update a map now
 
 Tap the ↻ on a map's card. The app re-maps that repository's newest commit
