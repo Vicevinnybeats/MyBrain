@@ -93,7 +93,7 @@ and **Explain**, search from the top bar, filter **Lobes**, and read the
   address bar.
 - It works offline for maps you've already opened.
 
-**In a map:** the ⚡ button turns the firing-signal animation on or off. Tap
+**In a map:** maps open as a **3D brain** you can turn with one finger, zoom with two, and tap. The **2D** button switches to the flat view (remembered per device). The ⚡ button turns the firing-signal animation on or off. Tap
 a neuron → **Path from here** → tap or search a second neuron to see the
 shortest chain of synapses between them, like `mybrain path`.
 

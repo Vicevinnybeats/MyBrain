@@ -19,7 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-APP_FILES = ["index.html", "app.css", "app.js", "graph.js", "layout-worker.js",
+APP_FILES = ["index.html", "app.css", "app.js", "graph.js", "brain3d.js", "layout-worker.js",
              "manifest.webmanifest", "sw.js"]
 ICONS = ["icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-192.png",
          "icon-maskable-512.png", "apple-touch-icon.png"]

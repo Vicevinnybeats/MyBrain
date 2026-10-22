@@ -2,7 +2,7 @@
  * maps you've already viewed. The app shell is cached at install time; maps are
  * fetched fresh when online and fall back to the cached copy when offline. */
 const VERSION = '__BUILD__';
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'graph.js', 'layout-worker.js',
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'graph.js', 'brain3d.js', 'layout-worker.js',
   'vendor/d3-force-bundle.min.js', 'manifest.webmanifest', 'icons/icon.svg',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 const SHELL_CACHE = 'mybrain-shell-' + VERSION;

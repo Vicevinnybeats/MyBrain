@@ -210,7 +210,7 @@
     const st = map.stats;
     $('#map-title').innerHTML = `<b>${esc(name)}</b> · ${fmt(st.neurons)} neurons · ${fmt(st.synapses)} synapses · ${fmt(st.lobes)} lobes`;
 
-    graph = new window.BrainGraph($('#canvas'), map, {
+    const opts = {
       theme: themeNow(),
       onSelect: (i) => {
         if (i >= 0 && pathFrom >= 0 && i !== pathFrom) { showPath(pathFrom, i); return; }
@@ -218,8 +218,25 @@
         else if (sheetMode === 'node' || sheetMode === 'explain' || sheetMode === 'path') closeSheet();
       },
       onHover: showTooltip,
-    });
+      labels: $('#labels3d'),
+    };
+    let three = want3d();
+    if (three) {
+      setProgress(0.5, 'Growing the brain…');
+      three = await load3d();
+      if (mapName !== name) return;
+    }
+    $('#canvas').hidden = three; $('#canvas3d').hidden = !three; $('#labels3d').hidden = !three;
+    $('#view3d').innerHTML = `<b>${three ? '2D' : '3D'}</b>`;
+    $('#view3d').hidden = !hasWebGL();
+    if (three) {
+      try { graph = new window.Brain3D($('#canvas3d'), map, opts); }
+      catch (e) { console.warn('3D view failed, using 2D', e); three = false; $('#canvas').hidden = false; $('#canvas3d').hidden = true; }
+    }
     window.__mybrain = graph;   // handy for debugging / tests
+    if (three) { applyAnim(); setProgress(null); layoutInsets(); return; }
+    graph = new window.BrainGraph($('#canvas'), map, opts);
+    window.__mybrain = graph;
     applyAnim();
 
     const key = `${name}@${map.published}`;
@@ -231,6 +248,37 @@
     }
     runLayout(key);
   }
+
+  // ---- 3D view: Three.js is loaded only when a map is opened in 3D
+  const VIEW_KEY = 'mybrain-view';
+  function want3d() {
+    let v = null;
+    try { v = localStorage.getItem(VIEW_KEY); } catch (e) { /* private mode */ }
+    return v !== '2d' && (!window.Brain3D || window.Brain3D.supported()) && hasWebGL();
+  }
+  function hasWebGL() {
+    try { const c = document.createElement('canvas'); return Boolean(c.getContext('webgl2') || c.getContext('webgl')); }
+    catch (e) { return false; }
+  }
+  const loadScript = (src) => new Promise((ok, fail) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = ok; el.onerror = () => fail(new Error('could not load ' + src));
+    document.head.appendChild(el);
+  });
+  let loading3d = null;
+  function load3d() {
+    if (window.Brain3D && window.THREE) return Promise.resolve(true);
+    loading3d = loading3d || loadScript('vendor/three-bundle.min.js').then(() => loadScript('brain3d.js'))
+      .then(() => true).catch(() => { loading3d = null; return false; });
+    return loading3d;
+  }
+  $('#view3d').onclick = () => {
+    const now3d = !$('#canvas3d').hidden;
+    try { localStorage.setItem(VIEW_KEY, now3d ? '2d' : '3d'); } catch (e) { /* private mode */ }
+    const name = mapName;
+    closeMap();
+    openMap(name);
+  };
 
   function runLayout(key) {
     setProgress(0.08, 'Growing neurons…');
@@ -362,7 +410,7 @@
     const sh = $('#sheet');
     const h = !sh.hidden && isPhone() ? sh.getBoundingClientRect().height : 0;
     $('.fabs').style.bottom = `calc(${h + 14}px + ${h ? '0px' : 'var(--safe-bottom)'})`;
-    if (graph) { graph.bottomInset = h; graph.draw(); }
+    if (graph) { graph.bottomInset = h; graph.rightInset = !sh.hidden && !isPhone() ? sh.getBoundingClientRect().width : 0; graph.draw(); }
   }
   $('#sheet-close').onclick = () => { if (graph && graph.selected >= 0) graph.select(-1); closeSheet(); };
   $('#sheet-handle').onclick = () => { $('#sheet').classList.toggle('tall'); setTimeout(layoutInsets, 240); };

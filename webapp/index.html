@@ -60,6 +60,8 @@
 <!-- ============ Map view ============ -->
 <section id="mapview" class="view" hidden>
   <canvas id="canvas" aria-label="Network map"></canvas>
+  <canvas id="canvas3d" aria-label="3D brain map" hidden></canvas>
+  <div id="labels3d" class="labels3d" aria-hidden="true"></div>
 
   <div class="topbar">
     <button id="back" class="icon-btn" aria-label="All maps">
@@ -83,6 +85,7 @@
   <div id="progress" class="progress" hidden><span></span><em>Growing neurons…</em></div>
 
   <div class="fabs">
+    <button id="view3d" class="icon-btn" aria-label="Switch between 3D and 2D" title="3D / 2D"><b>3D</b></button>
     <button id="anim" class="icon-btn on" aria-label="Animation on/off" title="Firing signals">
       <svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>
     </button>

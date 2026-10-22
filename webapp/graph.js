@@ -18,6 +18,49 @@
     return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
   }
 
+  // Shared by the 2D and 3D views: edges, degrees, lobe colours, neighbour lists.
+  function initData(g, map) {
+    const n = g.n = map.nodes.label.length;
+    const ed = map.edges;
+    g.E = ed.length / 3;
+    g.es = new Int32Array(g.E);
+    g.et = new Int32Array(g.E);
+    g.er = new Int32Array(g.E);
+    for (let e = 0; e < g.E; e++) {
+      g.es[e] = ed[3 * e]; g.et[e] = ed[3 * e + 1]; g.er[e] = ed[3 * e + 2];
+    }
+    g.deg = Int32Array.from(map.nodes.deg);
+    g.lobe = Int32Array.from(map.nodes.lobe);
+
+    // Lobe -> colour (same palette and order as the classic graph.html).
+    g.lobeColor = new Map();
+    g.lobeName = new Map();
+    for (const [cid, name] of map.lobes) {
+      g.lobeColor.set(cid, cid >= 0 ? cid % PALETTE.length : PALETTE.length - 1);
+      g.lobeName.set(cid, name);
+    }
+    g.col = new Uint8Array(n);
+    for (let i = 0; i < n; i++) g.col[i] = g.lobeColor.get(g.lobe[i]) ?? 9;
+
+    g.rw = new Float32Array(n);          // world radius
+    for (let i = 0; i < n; i++) g.rw[i] = 2.5 + 1.1 * Math.sqrt(g.deg[i]);
+
+    // Neighbour lists (CSR) for selection highlight / connections.
+    const cnt = new Int32Array(n + 1);
+    for (let e = 0; e < g.E; e++) { cnt[g.es[e] + 1]++; cnt[g.et[e] + 1]++; }
+    for (let i = 0; i < n; i++) cnt[i + 1] += cnt[i];
+    g.adjStart = cnt;
+    g.adj = new Int32Array(2 * g.E);   // edge ids
+    const fillp = cnt.slice(0, n);
+    for (let e = 0; e < g.E; e++) {
+      g.adj[fillp[g.es[e]]++] = e;
+      g.adj[fillp[g.et[e]]++] = e;
+    }
+
+    // Neurons ordered by importance (for labels).
+    g.byDeg = Array.from({ length: n }, (_, i) => i).sort((a, b) => g.deg[b] - g.deg[a]);
+  }
+
   class BrainGraph {
     constructor(canvas, map, opts = {}) {
       this.canvas = canvas;
@@ -27,45 +70,8 @@
       this.onHover = opts.onHover || (() => {});
       this.theme = opts.theme || 'dark';
 
-      const n = this.n = map.nodes.label.length;
-      const ed = map.edges;
-      this.E = ed.length / 3;
-      this.es = new Int32Array(this.E);
-      this.et = new Int32Array(this.E);
-      this.er = new Int32Array(this.E);
-      for (let e = 0; e < this.E; e++) {
-        this.es[e] = ed[3 * e]; this.et[e] = ed[3 * e + 1]; this.er[e] = ed[3 * e + 2];
-      }
-      this.deg = Int32Array.from(map.nodes.deg);
-      this.lobe = Int32Array.from(map.nodes.lobe);
-
-      // Lobe -> colour (same palette and order as the classic graph.html).
-      this.lobeColor = new Map();
-      this.lobeName = new Map();
-      for (const [cid, name] of map.lobes) {
-        this.lobeColor.set(cid, cid >= 0 ? cid % PALETTE.length : PALETTE.length - 1);
-        this.lobeName.set(cid, name);
-      }
-      this.col = new Uint8Array(n);
-      for (let i = 0; i < n; i++) this.col[i] = this.lobeColor.get(this.lobe[i]) ?? 9;
-
-      this.rw = new Float32Array(n);          // world radius
-      for (let i = 0; i < n; i++) this.rw[i] = 2.5 + 1.1 * Math.sqrt(this.deg[i]);
-
-      // Neighbour lists (CSR) for selection highlight / connections.
-      const cnt = new Int32Array(n + 1);
-      for (let e = 0; e < this.E; e++) { cnt[this.es[e] + 1]++; cnt[this.et[e] + 1]++; }
-      for (let i = 0; i < n; i++) cnt[i + 1] += cnt[i];
-      this.adjStart = cnt;
-      this.adj = new Int32Array(2 * this.E);   // edge ids
-      const fillp = cnt.slice(0, n);
-      for (let e = 0; e < this.E; e++) {
-        this.adj[fillp[this.es[e]]++] = e;
-        this.adj[fillp[this.et[e]]++] = e;
-      }
-
-      // Neurons ordered by importance (for labels).
-      this.byDeg = Array.from({ length: n }, (_, i) => i).sort((a, b) => this.deg[b] - this.deg[a]);
+      initData(this, map);
+      const n = this.n;
 
       this.x = new Float32Array(n);
       this.y = new Float32Array(n);
@@ -746,6 +752,7 @@
   }
 
   BrainGraph.PALETTE = PALETTE;
+  BrainGraph.initData = initData;
   BrainGraph.hexToRgb = hexToRgb;
   window.BrainGraph = BrainGraph;
 })();
