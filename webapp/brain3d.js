@@ -68,8 +68,10 @@
       this.camera.position.set(R * 1.1, R * 0.9, R * 2.2);
       const controls = this.controls = new T.OrbitControls(this.camera, canvas);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.08;
-      controls.rotateSpeed = 0.6;
+      // A slow glide after the finger lifts reads as lag on a phone: the brain
+      // trails the finger. There it follows closely and stops quickly.
+      controls.dampingFactor = this.phone ? 0.3 : 0.08;
+      controls.rotateSpeed = this.phone ? 0.85 : 0.6;
       controls.zoomSpeed = 0.9;
       controls.minDistance = 4;
       controls.maxDistance = R * 8;
@@ -77,7 +79,7 @@
       controls.autoRotateSpeed = 0.5;
       controls.addEventListener('start', () => { this._userMoving = true; controls.autoRotate = false; this._idleAt = 0; });
       controls.addEventListener('end', () => { this._userMoving = false; this._idleAt = performance.now(); });
-      controls.addEventListener('change', () => this.draw());
+      controls.addEventListener('change', () => { if (!controls.autoRotate) this._lastChange = performance.now(); this.draw(); });
 
       this._buildNodes();
       this._buildEdges();
@@ -208,6 +210,7 @@
       g.setAttribute('color', new T.BufferAttribute(col, 3));
       g.setAttribute('size', new T.BufferAttribute(size, 1));
       g.setAttribute('alpha', new T.BufferAttribute(this.alpha, 1));
+      g.setIndex(new T.BufferAttribute(Uint32Array.from(this.byDeg), 1));   // busiest first: any prefix is the best subset
       this.nodeGeom = g;
       this.nodeMat = new T.ShaderMaterial({
         uniforms: { uScale: { value: 300 }, uMaxSize: { value: this.phone ? 24 : 64 }, uDensity: { value: Math.min(1, Math.max(0.18, Math.sqrt(1200 / n))) } },
@@ -250,6 +253,17 @@
       // a phone draws the most important synapses only
       this.edgeCap = this.phone ? 7000 : 160000;
       this.moveCap = this.phone ? 2500 : 40000;   // synapses drawn while the brain is moving
+      // Phone quality while a finger moves it. The level steps down by itself when
+      // this phone's frames come out slow, and is remembered on the device.
+      this.levels = [
+        { ratio: 0.7, nodes: 6000, edges: 2500, membrane: 1 / 3 },
+        { ratio: 0.55, nodes: 3000, edges: 1200, membrane: 1 / 6 },
+        { ratio: 0.45, nodes: 1500, edges: 500, membrane: 0 },
+      ];
+      let lv = 0;
+      try { lv = Math.min(2, Math.max(0, Number(localStorage.getItem('mybrain-3d-level')) || 0)); } catch (e) { /* private mode */ }
+      this.level = this.phone ? lv : 0;
+      this._gaps = [];
       this.edgeOpacity = 0.22 * Math.min(1, Math.max(0.2, Math.sqrt(2500 / Math.max(1, this.E))));
       this.edgeMat = new T.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: this.edgeOpacity,
         depthWrite: false, blending: T.AdditiveBlending });
@@ -455,7 +469,7 @@
       this.W = Math.max(1, r.width); this.H = Math.max(1, r.height);
       const cap = this.phone ? 1 : this.n > 20000 ? 1.25 : 1.5;
       this.dpr = Math.min(window.devicePixelRatio || 1, cap);
-      this.renderer.setPixelRatio(this.dpr);
+      this.renderer.setPixelRatio(this.dpr); this._ratio = this.dpr;
       this.renderer.setSize(this.W, this.H, false);
       this.composer.setPixelRatio(this.dpr);
       this.composer.setSize(this.W, this.H);
@@ -692,23 +706,16 @@
           this.selected < 0 && !this.path && now - this._idleAt > 9000) this.controls.autoRotate = true;
       this.controls.update(dt);
       const live = this.animate || this._fly || this._userMoving || this.beams.length || this.agents.length || this.controls.autoRotate;
-      if (this.animate) this._stepPulses(now, dt);
-      this._markerBeams(now);
+      if (this.animate && !(this.phone && this._wasMoving)) this._stepPulses(now, dt);
+      if (!(this.phone && this._wasMoving)) this._markerBeams(now);
       this._stepBeams(now);
-      const moving = Boolean(this._userMoving || this._fly);
+      // still moving for a moment after the finger lifts, while the turn settles
+      const moving = Boolean(this._userMoving || this._fly || now - (this._lastChange || 0) < 140);
       if (moving !== this._wasMoving) {
-        this._wasMoving = moving;
-        const n = this.edgeGeom.index ? this.edgeGeom.index.count : 0;
-        this.edgeGeom.setDrawRange(0, moving ? Math.min(n, 2 * this.moveCap) : Infinity);
-        this.membrane.geometry.setDrawRange(0, moving && this.phone ? 2 * Math.floor(this.membrane.geometry.index.count / 6) : Infinity);
-        if (this.phone) {
-          const ratio = moving ? Math.min(this.dpr, 0.7) : this.dpr, k = this.H * ratio * 0.5;
-          this.renderer.setPixelRatio(ratio);
-          this.renderer.setSize(this.W, this.H, false);
-          this.nodeMat.uniforms.uScale.value = k; this.pulseMat.uniforms.uScale.value = k; this.sprMat.uniforms.uScale.value = k;
-        }
-        if (!moving) this._dirty = true;
+        this._wasMoving = moving; this._prevMoveFrame = 0; this._gaps = [];
+        this._applyQuality(moving); if (!moving) this._dirty = true;
       }
+      if (moving && this.phone) this._govern(now);
       // a phone turning on its own needs no more than 30 frames a second
       const throttle = this.phone && !moving && !this._dirty && now - (this._lastDraw || 0) < 32;
       if ((this._dirty || live) && !throttle) {
@@ -720,6 +727,39 @@
         this._labels(now);
       }
       if (live) { this._loopOn = true; requestAnimationFrame(this._frame); }
+    }
+
+    _applyQuality(moving) {
+      const q = this.levels[this.level], ph = this.phone && moving;
+      const ne = this.edgeGeom.index ? this.edgeGeom.index.count : 0;
+      this.edgeGeom.setDrawRange(0, moving ? Math.min(ne, 2 * (ph ? q.edges : this.moveCap)) : Infinity);
+      this.nodeGeom.setDrawRange(0, ph ? Math.min(this.n, q.nodes) : Infinity);
+      const nm = this.membrane.geometry.index.count;
+      this.membrane.geometry.setDrawRange(0, ph ? 2 * Math.floor(nm * q.membrane / 2) : Infinity);
+      if (!this.phone) return;
+      const ratio = ph ? Math.min(this.dpr, q.ratio) : this.dpr, k = this.H * ratio * 0.5;
+      if (ratio !== this._ratio) {
+        this._ratio = ratio;
+        this.renderer.setPixelRatio(ratio);
+        this.renderer.setSize(this.W, this.H, false);
+      }
+      this.nodeMat.uniforms.uScale.value = k; this.pulseMat.uniforms.uScale.value = k; this.sprMat.uniforms.uScale.value = k;
+    }
+
+    // Watch real frame times while a finger moves the brain: slower than ~30 fps
+    // steps quality down a level (at most twice), and the phone remembers it.
+    _govern(now) {
+      if (this._prevMoveFrame) this._gaps.push(now - this._prevMoveFrame);
+      this._prevMoveFrame = now;
+      if (this._gaps.length < 24) return;
+      const g = this._gaps.sort((a, b) => a - b), med = g[g.length >> 1];
+      this._gaps = [];
+      if (med > 34 && this.level < this.levels.length - 1) {
+        this.level++;
+        try { localStorage.setItem('mybrain-3d-level', String(this.level)); } catch (e) { /* private mode */ }
+        this._applyQuality(true);
+      }
+      this.lastMoveFrameMs = med;
     }
 
     // If frames get slow (an older phone), drop the glow rather than stutter.

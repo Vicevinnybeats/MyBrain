@@ -6,8 +6,14 @@ token count when Claude finishes a reply, to the app's /api/activity. The app
 shows them live: the Brain Monitor's activity feed and beams in the 3D brain.
 
 What is sent: the repository name, the session id (shortened), the kind of
-action (read / write / search / run), the file path inside the repository and
-token totals. Never file contents, never commands, never search patterns.
+action (read / write / search / run / ask), the file path inside the repository
+and token totals. Never file contents, never commands, never search patterns.
+
+Tokens saved: when Claude asks the map (`mybrain query`, `path` or `explain`),
+the answer names the files it covers. Reading those files in full is what
+Claude would otherwise have done, so the hook counts their size against the
+size of the answer (both at about 4 characters a token) and sends the
+difference as "saved". An estimate, measured on the repository's own files.
 
 It never slows Claude down or gets in its way: the hook returns at once, the
 network call happens in a detached process with a short timeout, and every
@@ -94,6 +100,27 @@ def tokens_of(transcript: str) -> dict:
     return tot
 
 
+ASK = re.compile(r"\bmybrain\s+(query|path|explain)\b")
+SRC = re.compile(r"\bsrc=([^\s\]]+)")
+
+
+def tokens_saved(output: str, root: str) -> dict:
+    """Tokens of a map answer, and of the files it names (what reading them would cost)."""
+    used = len(output) // 4
+    files, seen = 0, set()
+    for f in SRC.findall(output):
+        if f in seen:
+            continue
+        seen.add(f)
+        try:
+            p = (Path(root) / f).resolve()
+            if Path(root).resolve() in p.parents and p.is_file():
+                files += p.stat().st_size // 4
+        except OSError:
+            pass
+    return {"used": used, "saved": max(0, files - used), "files": len(seen)}
+
+
 def event_from_hook(h: dict) -> dict | None:
     name = h.get("hook_event_name") or ""
     cwd = h.get("cwd") or os.getcwd()
@@ -105,6 +132,11 @@ def event_from_hook(h: dict) -> dict | None:
         if not kind:
             return None
         ti = h.get("tool_input") or {}
+        if tool == "Bash" and ASK.search(str(ti.get("command") or "")):
+            resp = h.get("tool_response") or {}
+            out = resp.get("stdout") if isinstance(resp, dict) else str(resp)
+            ev.update(kind="ask", tokens=tokens_saved(str(out or ""), root))
+            return ev
         path = ti.get("file_path") or ti.get("notebook_path") or ti.get("path") or ""
         if path:
             try:

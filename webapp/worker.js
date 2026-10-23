@@ -264,7 +264,7 @@ async function api(request, env, ctx, path) {
 // hook) is kept for a day in one Durable Object, so every phone and computer sees
 // the same feed. Sending is open (sessions hold no key) but strictly shaped and
 // rate limited; reading needs the key, like the rest of the app.
-const KINDS = new Set(['read', 'write', 'search', 'run', 'start', 'tokens']);
+const KINDS = new Set(['read', 'write', 'search', 'run', 'start', 'tokens', 'ask']);
 const DAY = 86400000;
 
 function cleanEvent(b) {
@@ -282,6 +282,10 @@ function cleanEvent(b) {
     const t = b.tokens || {}, n = (v) => Math.max(0, Math.min(1e11, Math.floor(Number(v) || 0)));
     ev.tokens = { input: n(t.input), output: n(t.output), cache: n(t.cache) };
   }
+  if (kind === 'ask') {   // a map question: its answer's tokens and the file tokens it spared
+    const t = b.tokens || {}, n = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
+    ev.tokens = { used: n(t.used, 1e6), saved: n(t.saved, 5e6), files: n(t.files, 1e4) };
+  }
   return ev;
 }
 
@@ -291,6 +295,8 @@ export class Activity {
   async load() {
     if (!this.data) this.data = (await this.state.storage.get('data')) || { events: [], sessions: {} };
     const cut = Date.now() - DAY, d = this.data;
+    // all-time totals survive the one-day window: map questions and tokens they saved
+    d.totals = d.totals || { asks: 0, saved: 0, since: Date.now() };
     d.events = d.events.filter(e => e.t > cut);
     for (const [k, v] of Object.entries(d.sessions)) if (v.last < cut) delete d.sessions[k];
     return d;
@@ -312,10 +318,15 @@ export class Activity {
       if (this.limited(ev.session)) return json({ error: 'slow-down' }, 429);
       const now = Date.now();
       const s = d.sessions[ev.session] || (d.sessions[ev.session] = { id: ev.session, repo: ev.repo, first: now, last: now,
-        read: 0, write: 0, search: 0, run: 0, tokens: { input: 0, output: 0, cache: 0 } });
+        read: 0, write: 0, search: 0, run: 0, ask: 0, saved: 0, tokens: { input: 0, output: 0, cache: 0 } });
       s.last = now; s.repo = ev.repo;
       if (ev.kind === 'tokens') s.tokens = ev.tokens;
-      else {
+      else if (ev.kind === 'ask') {
+        s.ask = (s.ask || 0) + 1; s.saved = (s.saved || 0) + ev.tokens.saved;
+        d.totals.asks++; d.totals.saved += ev.tokens.saved;
+        d.events.push({ t: now, s: ev.session, repo: ev.repo, kind: 'ask', path: '', saved: ev.tokens.saved, files: ev.tokens.files });
+        if (d.events.length > 500) d.events.splice(0, d.events.length - 500);
+      } else {
         if (ev.kind in s) s[ev.kind]++;
         if (ev.path) { s.lastPath = ev.path; s.lastKind = ev.kind; }
         d.events.push({ t: now, s: ev.session, repo: ev.repo, kind: ev.kind, path: ev.path || '' });
@@ -325,7 +336,7 @@ export class Activity {
       return json({ ok: true });
     }
     const since = Number(new URL(request.url).searchParams.get('since')) || 0;
-    return json({ now: Date.now(), events: d.events.filter(e => e.t > since).slice(-200), sessions: Object.values(d.sessions) });
+    return json({ now: Date.now(), events: d.events.filter(e => e.t > since).slice(-200), sessions: Object.values(d.sessions), totals: d.totals });
   }
 }
 

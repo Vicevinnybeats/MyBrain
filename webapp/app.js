@@ -110,7 +110,7 @@
     if (!sesColors.has(id)) sesColors.set(id, SES_COLORS[sesColors.size % SES_COLORS.length]);
     return sesColors.get(id);
   };
-  const act = { events: [], sessions: [], since: 0, off: false, skew: 0 };
+  const act = { events: [], sessions: [], since: 0, off: false, skew: 0, totals: null };
   let actTimer = 0;
   async function fetchActivity() {
     if (!getKey() || act.off) return false;
@@ -124,6 +124,7 @@
       act.events = act.events.concat(fresh).slice(-300);
       act.since = fresh[fresh.length - 1].t;
     }
+    act.totals = d.totals || act.totals;
     act.sessions = (d.sessions || []).sort((a, b) => a.first - b.first);
     act.sessions.forEach(x => sesColor(x.id));
     onActivity(fresh);
@@ -156,8 +157,8 @@
       const idle = now - s.last > 2 * 60000;
       const doing = s.lastPath ? `<b>${esc((s.lastKind || '').toUpperCase())}</b> ${esc(tail(s.lastPath))}` : 'started';
       return `<div class="ses${idle ? ' idle' : ''}" style="--c:${sesColor(s.id)}"><span class="dot"></span>
-        <span class="nm">${esc(sesName(s))}</span><span class="tk" title="tokens this session">${tokTotal(s.tokens) ? '~' + kTok(tokTotal(s.tokens)) : ''}</span>
-        <span class="now">${idle ? `idle ${esc(ago(new Date(s.last).toISOString()))} · ` : ''}${doing} · ${s.read} read · ${s.write} changed · ${s.search} searched</span></div>`;
+        <span class="nm">${esc(sesName(s))}</span><span class="tk" title="tokens used / saved by asking the map this session">${tokTotal(s.tokens) ? '~' + kTok(tokTotal(s.tokens)) : ''}${s.saved ? ` <span class="sv">−${kTok(s.saved)}</span>` : ''}</span>
+        <span class="now">${idle ? `idle ${esc(ago(new Date(s.last).toISOString()))} · ` : ''}${doing} · ${s.ask ? `${s.ask} map question${s.ask === 1 ? '' : 's'} · ` : ''}${s.read} read · ${s.write} changed · ${s.search} searched</span></div>`;
     }).join('');
   }
 
@@ -167,7 +168,8 @@
     $('#feed').innerHTML = ev.map(e => {
       const s = byId.get(e.s) || { repo: e.repo };
       return `<div class="fe" style="--c:${sesColor(e.s)}"><time>${clock(e.t)}</time><span class="who">${esc(short(s.repo || e.repo))}</span>
-        <span class="kd ${esc(e.kind)}">${esc(e.kind.toUpperCase())}</span><span class="pth">${esc(tail(e.path || ''))}</span></div>`;
+        <span class="kd ${esc(e.kind)}">${esc(e.kind.toUpperCase())}</span><span class="pth">${e.kind === 'ask'
+          ? `<b class="sv">saved ~${kTok(e.saved || 0)}</b> · ${fmt(e.files || 0)} file${e.files === 1 ? '' : 's'} not read` : esc(tail(e.path || ''))}</span></div>`;
     }).join('');
   }
 
@@ -228,7 +230,13 @@
     const linkedPct = neurons ? 100 * (1 - unlinked / neurons) : 0;
     const tile = (k, v, pct, sub) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>
       <div class="bar"><span style="width:${Math.max(2, Math.min(100, pct)).toFixed(0)}%"></span></div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+    const tot = act.totals, savedDay = act.events.filter(e => e.kind === 'ask').reduce((a, e) => a + (e.saved || 0), 0);
+    const asksDay = act.events.filter(e => e.kind === 'ask').length;
     $('#vitals').innerHTML = [
+      `<div class="tile saved"><div class="k">Tokens saved</div><div class="v">${tot && tot.saved ? '~' + kTok(tot.saved) : '0'}</div>
+        <div class="bar"><span style="width:100%"></span></div><div class="s">${tot && tot.asks
+          ? `${fmt(tot.asks)} map question${tot.asks === 1 ? '' : 's'}${savedDay ? ` · ~${kTok(savedDay)} today` : ''}`
+          : (getKey() ? 'counts when Claude asks the map' : 'needs your key')}</div></div>`,
       tile('Maps', fmt(idx.length), 100, newest ? `newest ${esc(ago(newest))}` : ''),
       tile('Neurons', fmt(neurons), 100, biggest ? `most in ${esc(biggest.name)}` : ''),
       tile('Synapses', fmt(syn), neurons ? 100 * syn / (2 * neurons) : 0, neurons ? `${(syn / Math.max(1, neurons)).toFixed(1)} per neuron` : ''),

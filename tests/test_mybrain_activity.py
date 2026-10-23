@@ -70,3 +70,20 @@ def test_off_switch_sends_nothing(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO('{"hook_event_name":"SessionStart","session_id":"s"}'))
     activity.main()
     assert sent == []
+
+
+def test_map_question_counts_tokens_saved_without_sending_its_text(tmp_path):
+    root = _repo(tmp_path)
+    (root / "src" / "big.py").write_text("x" * 4000)       # ~1000 tokens to read
+    (root / "src" / "small.py").write_text("y" * 400)      # ~100 tokens
+    out = ("NODE Foo [src=src/big.py loc=L1 community=a]\n"
+           "NODE Bar [src=src/small.py loc=L9 community=a]\n"
+           "NODE Baz [src=src/big.py loc=L20 community=a]\n"
+           "NODE Out [src=../../etc/passwd loc=L1 community=a]\n")
+    ev = activity.event_from_hook({"hook_event_name": "PostToolUse", "session_id": "s", "cwd": str(root),
+                                   "tool_name": "Bash", "tool_input": {"command": 'mybrain query "where is the secret sauce"'},
+                                   "tool_response": {"stdout": out}})
+    used = len(out) // 4
+    assert ev["kind"] == "ask"
+    assert ev["tokens"] == {"used": used, "saved": 1100 - used, "files": 3}
+    assert "secret sauce" not in __import__("json").dumps(ev)

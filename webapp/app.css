@@ -303,3 +303,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .fe .kd.run { color: #c4b5fd; background: rgba(196, 181, 253, .12); }
 .fe .kd.start { color: #34d399; background: rgba(52, 211, 153, .12); }
 .fe .pth { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* tokens saved by asking the map */
+.tile.saved { border-color: rgba(52, 211, 153, .45); background: linear-gradient(180deg, rgba(52, 211, 153, .10), transparent 70%), var(--panel-2); }
+.tile.saved .v { color: #34d399; }
+.tile.saved .bar span { background: linear-gradient(90deg, #34d399, #22d3ee); }
+.sv { color: #34d399; font-weight: 700; }
+.fe .kd.ask { color: #34d399; background: rgba(52, 211, 153, .12); }

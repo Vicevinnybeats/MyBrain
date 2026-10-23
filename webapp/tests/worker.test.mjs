@@ -91,6 +91,14 @@ assert.equal(ses.read, 1); assert.equal(ses.write, 1); assert.deepEqual(ses.toke
 assert.equal(ses.lastPath, 'src/a.cpp');
 const later = await (await req('/api/activity?since=' + (Date.now() + 1000), { headers: { 'x-mybrain-key': 'k' } })).json();
 assert.equal(later.events.length, 0);
+// map questions: tokens saved add up per session and all time
+assert.equal((await post({ session: 'abc123', repo: 'Vicevinnybeats/GNARL', kind: 'ask', tokens: { used: 900, saved: 12000, files: 7 } })).status, 200);
+assert.equal((await post({ session: 'abc123', repo: 'Vicevinnybeats/GNARL', kind: 'ask', tokens: { used: 500, saved: 3000, files: 2 } })).status, 200);
+const asked = await (await req('/api/activity', { headers: { 'x-mybrain-key': 'k' } })).json();
+assert.equal(asked.sessions.find(x => x.id === 'abc123').saved, 15000);
+assert.deepEqual([asked.totals.asks, asked.totals.saved], [2, 15000]);
+assert.equal(asked.events.filter(e => e.kind === 'ask').length, 2);
+
 // rate limit: one session can't flood the feed
 let limited = 0;
 for (let k = 0; k < 130; k++) if ((await post({ session: 'flood', repo: 'x', kind: 'read', path: 'a' })).status === 429) limited++;

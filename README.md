@@ -138,6 +138,10 @@ One-time settings (already done for this app):
 
 The home screen refreshes itself while it is open:
 
+- **Tokens saved:** each time Claude asks the map instead of reading files,
+  MyBrain counts the files the answer named and what reading them in full would
+  have cost, minus the answer itself. The total since the start, and today's.
+  (An estimate at about 4 characters a token, measured on the repo's own files.)
 - **Brain vitals:** neurons, synapses, lobes and files across all maps, and
   Claude's tokens in the last 24 hours.
 - **Activity:** every Claude session that is working right now (which repo,
